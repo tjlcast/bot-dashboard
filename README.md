@@ -20,3 +20,5 @@ npm start
 ```
 
 启动与停止脚本位于 `platform/scripts/`。
+
+客户端上报工具见 [clients/agent-reporter](clients/agent-reporter/README.md)。

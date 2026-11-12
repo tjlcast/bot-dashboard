@@ -15,6 +15,8 @@ type Credential = { deviceId: string; token: string; pairedAt: string };
 type PendingReport = {
   idempotencyKey: string;
   body: ReportBody;
+  messageId?: string;
+  parentMessageId?: string;
   queuedAt: string;
   attempts: number;
 };
@@ -22,6 +24,8 @@ type PersistedState = {
   version: 1;
   credential?: Credential;
   pending: PendingReport[];
+  /** Paseo assistant message ID -> Agent Control Plane node ID. */
+  nodeIdByMessageId: Record<string, string>;
 };
 type ReportBody = {
   app: string;
@@ -34,6 +38,7 @@ type ReportBody = {
   conclusion: string;
   occurredAt: string;
 };
+type ReportResult = { nodeId: string };
 
 const apiBase = (process.env.ACP_API_URL ?? 'http://localhost:3000/v1').replace(/\/$/, '');
 const statePath = process.env.ACP_PASEO_REPORTER_STATE_PATH
@@ -44,7 +49,7 @@ let state: PersistedState | undefined;
 let serial = Promise.resolve();
 
 function defaultState(): PersistedState {
-  return { version: 1, pending: [] };
+  return { version: 1, pending: [], nodeIdByMessageId: {} };
 }
 
 async function loadState(): Promise<PersistedState> {
@@ -54,7 +59,10 @@ async function loadState(): Promise<PersistedState> {
     state = {
       version: 1,
       credential: parsed.credential,
-      pending: Array.isArray(parsed.pending) ? parsed.pending : []
+      pending: Array.isArray(parsed.pending) ? parsed.pending : [],
+      nodeIdByMessageId: parsed.nodeIdByMessageId && typeof parsed.nodeIdByMessageId === 'object'
+        ? parsed.nodeIdByMessageId as Record<string, string>
+        : {}
     };
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -94,17 +102,28 @@ async function credential(): Promise<Credential> {
   return saved.credential;
 }
 
-async function send(report: PendingReport): Promise<void> {
+async function send(report: PendingReport): Promise<ReportResult> {
   const auth = await credential();
-  await api('/reports', {
+  const saved = await loadState();
+  const parentNodeId = report.parentMessageId ? saved.nodeIdByMessageId[report.parentMessageId] : undefined;
+  return api<ReportResult>('/reports', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${auth.token}`,
       'Idempotency-Key': report.idempotencyKey
     },
-    body: JSON.stringify(report.body)
+    body: JSON.stringify({ ...report.body, parentNodeId: parentNodeId ?? null })
   });
+}
+
+function rememberNode(saved: PersistedState, messageId: string, nodeId: string): void {
+  saved.nodeIdByMessageId[messageId] = nodeId;
+  const ids = Object.keys(saved.nodeIdByMessageId);
+  // Keep enough history for old rewind points while preventing unbounded state growth.
+  for (const obsoleteId of ids.slice(0, Math.max(0, ids.length - 2_000))) {
+    delete saved.nodeIdByMessageId[obsoleteId];
+  }
 }
 
 async function flushPending(): Promise<void> {
@@ -112,7 +131,8 @@ async function flushPending(): Promise<void> {
   while (saved.pending.length > 0) {
     const report = saved.pending[0];
     try {
-      await send(report);
+      const result = await send(report);
+      if (report.messageId) rememberNode(saved, report.messageId, result.nodeId);
       saved.pending.shift();
       await saveState();
     } catch {
@@ -129,19 +149,27 @@ function queued<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
-function keyFor(agentId: string, turnId: string | null, text: string): string {
+function keyFor(agentId: string, messageId: string | undefined, turnId: string | null, text: string): string {
+  if (messageId) return `paseo:${agentId}:message:${messageId}`;
   if (turnId) return `paseo:${agentId}:${turnId}`;
   return `paseo:${agentId}:no-turn:${createHash('sha256').update(text).digest('hex')}:${randomUUID()}`;
 }
 
-export async function reportCompletedText(agent: PaseoAgent, turnId: string | null, text: string): Promise<void> {
-  if (!text.trim()) return;
+export async function reportCompletedText(
+  agent: PaseoAgent,
+  turnId: string | null,
+  reply: { text: string; messageId?: string; parentMessageId?: string }
+): Promise<void> {
+  if (!reply.text.trim()) return;
   await queued(async () => {
     const saved = await loadState();
-    const idempotencyKey = keyFor(agent.id, turnId, text);
+    if (reply.messageId && saved.nodeIdByMessageId[reply.messageId]) return;
+    const idempotencyKey = keyFor(agent.id, reply.messageId, turnId, reply.text);
     if (!saved.pending.some((item) => item.idempotencyKey === idempotencyKey)) {
       saved.pending.push({
         idempotencyKey,
+        messageId: reply.messageId,
+        parentMessageId: reply.parentMessageId,
         queuedAt: new Date().toISOString(),
         attempts: 0,
         body: {
@@ -151,8 +179,8 @@ export async function reportCompletedText(agent: PaseoAgent, turnId: string | nu
           traceTitle: agent.title ?? `Paseo agent ${agent.id}`,
           nodeType: 'report',
           title: agent.title ? `${agent.title}: text reply` : 'Paseo agent text reply',
-          detail: text,
-          conclusion: text,
+          detail: reply.text,
+          conclusion: reply.text,
           occurredAt: new Date().toISOString()
         }
       });

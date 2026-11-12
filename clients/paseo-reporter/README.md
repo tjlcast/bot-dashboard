@@ -32,7 +32,8 @@ $env:ACP_DEVICE_TOKEN = '<existing-device-token>'
 
 - 仅处理 `agent.turn.after` 中 `outcome.kind === 'completed'` 的回合；失败或取消的回合不会上报。
 - 纯工具调用或没有文本的回合不会创建空节点。
-- 使用 `turnId` 生成幂等键；网络异常时事件先写入本地 outbox，之后每分钟和下一次成功回合时重试。
-- 同一个 Paseo Agent 的回复使用同一个 `agent.id` 作为 `sessionId` 与 `localTraceSeq`，因而聚合到同一条 trace。
+- 优先使用 Paseo 的 `messageId`（缺失时回退到 `turnId`）生成幂等键；网络异常时事件先写入本地 outbox，之后每分钟和下一次成功回合时重试。
+- 同一个 Paseo Agent 的回复使用同一个 `agent.id` 作为 `sessionId` 与 `localTraceSeq`，因而聚合到同一条 trace。插件还会保存 `messageId -> 平台 nodeId` 的映射，并将当前 timeline 中紧邻的前一条 assistant 消息作为 `parentNodeId`。
+- 在 Paseo 回退到历史消息后，回退丢弃的消息不再位于当前 timeline。后续回复因此接到该回退点的历史节点，形成新分支，而不会错误接到旧分支末尾。
 
 `ACP_DEVICE_NAME` 可选，用于首次自动配对时显示的设备名；默认值为 `paseo-<hostname>`。

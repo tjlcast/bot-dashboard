@@ -1,5 +1,5 @@
 import type { PluginServerContext } from '@getpaseo/plugin/server';
-import { latestOutputText } from './server/inspect.js';
+import { latestTextReply } from './server/inspect.js';
 import { reportCompletedText, retryPendingReports } from './server/reporter.js';
 
 export default function contribute(server: PluginServerContext) {
@@ -13,8 +13,8 @@ export default function contribute(server: PluginServerContext) {
 
     const agent = context.paseo.agents.ref(event.agent.id);
     const page = await agent.timeline.refetch({ direction: 'tail', limit: 100 });
-    const text = latestOutputText(page.entries.map(({ item }) => item));
-    await reportCompletedText(event.agent, event.turnId, text);
+    const reply = latestTextReply(page.entries.map(({ item }) => item));
+    if (reply) await reportCompletedText(event.agent, event.turnId, reply);
   });
 
   return () => {

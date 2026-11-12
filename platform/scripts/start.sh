@@ -11,5 +11,8 @@ if pgrep -f 'node.*server/index\.js' >/dev/null; then
 fi
 
 cd "$PROJECT_ROOT"
+npm install
+npm run check
+
 PORT="$PORT" nohup node server/index.js > service.log 2>&1 &
 echo "Service started (PID $!): http://localhost:$PORT"

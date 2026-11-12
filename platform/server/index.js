@@ -23,6 +23,12 @@ CREATE INDEX IF NOT EXISTS idx_trace_activity ON traces(last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_node_trace ON nodes(trace_id, occurred_at ASC);
 CREATE INDEX IF NOT EXISTS idx_node_parent ON nodes(parent_node_id);
 `);
+// Existing reports establish the initial read baseline on upgrade.
+let addedTraceViewColumn = false;
+try { db.exec('ALTER TABLE traces ADD COLUMN last_viewed_at TEXT'); addedTraceViewColumn = true; } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+if (addedTraceViewColumn) db.prepare('UPDATE traces SET last_viewed_at=last_activity_at WHERE last_viewed_at IS NULL').run();
 
 const now = () => new Date().toISOString();
 const hash = (text) => createHash('sha256').update(text).digest('hex');
@@ -45,7 +51,7 @@ function seed() {
   addDevice.run('macbook-pro', 'MacBook Pro', hash('dev_mac_token'), 'online', at, at);
   addDevice.run('workstation-win', 'Windows Workstation', hash('dev_windows_token'), 'online', at, at);
   addDevice.run('mac-mini', 'Mac mini', hash('dev_mini_token'), 'offline', '2026-11-12T01:15:00.000Z', at);
-  const addTrace = db.prepare('INSERT INTO traces VALUES(?,?,?,?,?,?)');
+  const addTrace = db.prepare('INSERT INTO traces(id,title,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?)');
   const addNode = db.prepare('INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const records = [
     ['trace-launch', '发布营销站', 'MacBook Pro · Codex', '2026-11-12T01:20:00.000Z', [
@@ -64,7 +70,7 @@ function seed() {
     ]]
   ];
   for (const [id, title, source, created, nodes] of records) {
-    addTrace.run(id, title, source, created, created, 0);
+    addTrace.run(id, title, source, created, created, 0, created);
     for (const node of nodes) addNode.run(node[0], id, ...node.slice(1));
     refreshTrace(id);
   }
@@ -88,7 +94,10 @@ app.get('/v1/traces', (request) => {
   const { sort = 'recent_activity', pendingOnly = 'false' } = request.query;
   const order = sort === 'pending_first' ? 'pending_count DESC, last_activity_at DESC' : sort === 'recent_created' ? 'created_at DESC' : 'last_activity_at DESC';
   const where = pendingOnly === 'true' ? 'WHERE pending_count > 0' : '';
-  return { traces: db.prepare(`SELECT *, (SELECT COUNT(*) FROM nodes WHERE trace_id=traces.id) AS node_count FROM traces ${where} ORDER BY ${order}`).all() };
+  return { traces: db.prepare(`SELECT *,
+    (SELECT COUNT(*) FROM nodes WHERE trace_id=traces.id) AS node_count,
+    (SELECT COUNT(*) FROM nodes WHERE trace_id=traces.id AND occurred_at > COALESCE(traces.last_viewed_at, '')) AS unread_count
+    FROM traces ${where} ORDER BY ${order}`).all() };
 });
 app.get('/v1/traces/:traceId', (request, reply) => {
   const trace = db.prepare('SELECT * FROM traces WHERE id=?').get(request.params.traceId);
@@ -98,6 +107,13 @@ app.get('/v1/traces/:traceId/nodes', (request, reply) => {
   const trace = db.prepare('SELECT id FROM traces WHERE id=?').get(request.params.traceId);
   if (!trace) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: '汇报链不存在' } });
   return { nodes: db.prepare('SELECT * FROM nodes WHERE trace_id=? ORDER BY occurred_at').all(request.params.traceId) };
+});
+app.post('/v1/traces/:traceId/view', (request, reply) => {
+  const trace = db.prepare('SELECT last_viewed_at FROM traces WHERE id=?').get(request.params.traceId);
+  if (!trace) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: '汇报链不存在' } });
+  const newNodeIds = db.prepare("SELECT id FROM nodes WHERE trace_id=? AND occurred_at > COALESCE(?, '') ORDER BY occurred_at").all(request.params.traceId, trace.last_viewed_at).map((node) => node.id);
+  db.prepare('UPDATE traces SET last_viewed_at=? WHERE id=?').run(now(), request.params.traceId);
+  return { newNodeIds };
 });
 app.get('/v1/nodes/:nodeId', (request, reply) => {
   const node = db.prepare(`SELECT n.*, d.name AS device_name, t.title AS trace_title FROM nodes n JOIN devices d ON d.id=n.device_id JOIN traces t ON t.id=n.trace_id WHERE n.id=?`).get(request.params.nodeId);
@@ -128,7 +144,7 @@ app.post('/v1/reports', (request, reply) => {
   const traceId = shortHash(`${device.id}|${input.app}|${input.sessionId}|${input.localTraceSeq || input.sessionId}`);
   const nodeId = randomUUID(); const timestamp = input.occurredAt; const source = `${device.name} · ${input.app}`;
   const write = db.transaction(() => {
-    db.prepare('INSERT OR IGNORE INTO traces VALUES(?,?,?,?,?,0)').run(traceId, input.traceTitle || input.title, source, timestamp, timestamp);
+    db.prepare('INSERT OR IGNORE INTO traces(id,title,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?)').run(traceId, input.traceTitle || input.title, source, timestamp, timestamp, 0, null);
     if (input.parentNodeId) { const parent = db.prepare('SELECT trace_id FROM nodes WHERE id=?').get(input.parentNodeId); if (!parent || parent.trace_id !== traceId) throw new Error('INVALID_PARENT'); }
     db.prepare('INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nodeId, traceId, input.parentNodeId || null, input.nodeType, input.nodeType === 'blocked' ? 'blocked' : 'completed', device.id, input.app, input.sessionId, timestamp, input.title, input.detail || '', input.input || null, input.conclusion || null, input.sourceUrl || null);
     db.prepare('UPDATE devices SET last_seen_at=?, state=? WHERE id=?').run(now(), 'online', device.id);

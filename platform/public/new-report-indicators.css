@@ -1,0 +1,7 @@
+.node.new-report { border-color: var(--green); box-shadow: 0 0 0 3px #ccebdd; }
+.node.new-report.selected { box-shadow: 0 0 0 3px #ccebdd, 0 0 0 6px #dce9ff; }
+.node.blocked.new-report { border-color: var(--green); }
+.trace { position: relative; }
+.trace-new-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: #2ca36b; box-shadow: 0 0 0 2px var(--surface); }
+.trace.selected .trace-new-dot { box-shadow: 0 0 0 2px var(--blue-wash); }
+.trace.unread .trace-row { padding-right: 14px; }

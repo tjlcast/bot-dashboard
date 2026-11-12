@@ -1,0 +1,8 @@
+{
+  "id": "paseo-reporter",
+  "name": "Agent Control Plane Reporter",
+  "description": "Reports completed Paseo agent text replies to Agent Control Plane.",
+  "requirements": {
+    "paseo": ">=0.14.0"
+  }
+}

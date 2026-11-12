@@ -7,6 +7,7 @@
 ```powershell
 cd clients/mcp-reporter
 npm install
+npm run build
 ```
 
 平台服务需已启动：
@@ -25,8 +26,7 @@ npm install
     "agent-reporter": {
       "command": "C:\\Users\\phx10\\tools\\node-v22.19.0-win-x64\\node.exe",
       "args": [
-        "C:\\Users\\phx10\\code\\bot-dashboard\\clients\\mcp-reporter\\node_modules\\tsx\\dist\\cli.mjs",
-        "C:\\Users\\phx10\\code\\bot-dashboard\\clients\\mcp-reporter\\src\\index.ts"
+        "C:\\Users\\phx10\\code\\bot-dashboard\\clients\\mcp-reporter\\dist\\index.js"
       ],
       "env": {
         "ACP_API_URL": "http://localhost:3000/v1",

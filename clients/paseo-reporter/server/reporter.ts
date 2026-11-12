@@ -35,6 +35,7 @@ type ReportBody = {
   nodeType: 'report';
   title: string;
   detail: string;
+  input?: string;
   conclusion: string;
   occurredAt: string;
 };
@@ -158,7 +159,7 @@ function keyFor(agentId: string, messageId: string | undefined, turnId: string |
 export async function reportCompletedText(
   agent: PaseoAgent,
   turnId: string | null,
-  reply: { text: string; messageId?: string; parentMessageId?: string }
+  reply: { text: string; input?: string; messageId?: string; parentMessageId?: string }
 ): Promise<void> {
   if (!reply.text.trim()) return;
   await queued(async () => {
@@ -180,6 +181,7 @@ export async function reportCompletedText(
           nodeType: 'report',
           title: agent.title ? `${agent.title}: text reply` : 'Paseo agent text reply',
           detail: reply.text,
+          input: reply.input,
           conclusion: reply.text,
           occurredAt: new Date().toISOString()
         }

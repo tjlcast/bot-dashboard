@@ -2,6 +2,8 @@ import type { AgentTimelineItem } from '@getpaseo/protocol/agent-types';
 
 export type TextReply = {
   text: string;
+  /** The user message that initiated this completed reply. */
+  input?: string;
   /** The provider's ID for the assistant reply, when it exposes one. */
   messageId?: string;
   /** The assistant reply immediately preceding this user/assistant exchange. */
@@ -16,9 +18,12 @@ export type TextReply = {
  */
 export function latestTextReply(timeline: readonly AgentTimelineItem[]): TextReply | undefined {
   let userIndex = -1;
+  let input: string | undefined;
   for (let index = timeline.length - 1; index >= 0; index -= 1) {
-    if (timeline[index].type === 'user_message') {
+    const item = timeline[index];
+    if (item.type === 'user_message') {
       userIndex = index;
+      input = item.text.trim() || undefined;
       break;
     }
   }
@@ -36,5 +41,5 @@ export function latestTextReply(timeline: readonly AgentTimelineItem[]): TextRep
       break;
     }
   }
-  return { text, messageId, parentMessageId };
+  return { text, input: input || undefined, messageId, parentMessageId };
 }

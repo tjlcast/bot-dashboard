@@ -94,6 +94,7 @@ $PASEO_HOME/plugins/paseo-reporter/state.json
 
 - 仅在 `agent.turn.after` 且结果为 `completed` 时上报；失败或取消的回合跳过。
 - 只上报 assistant 的文本回复；纯工具调用或空文本不会创建空节点。
+- 同时提取触发该回复的最近一条用户消息，并写入平台节点的“输入 / 上下文”字段。
 - 同一个 Paseo Agent 使用相同的 `agent.id` 作为 `sessionId` 与 `localTraceSeq`，所以显示在同一条 trace 中。
 - 上报优先以 `messageId` 作为幂等标识；若 provider 未提供则退回使用 `turnId`。
 - 成功上报后会保存 `messageId -> nodeId`。下一条回复会从当前 Paseo timeline 找到其前一条 assistant 消息，并将对应平台节点作为 `parentNodeId`，组成链。

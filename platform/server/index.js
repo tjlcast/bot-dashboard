@@ -103,9 +103,9 @@ function requireDevice(request, reply) {
   return device;
 }
 app.get('/v1/traces', (request) => {
-  const { sort = 'recent_activity', pendingOnly = 'false' } = request.query;
+  const { sort = 'recent_activity', unreadOnly = 'false' } = request.query;
   const order = sort === 'pending_first' ? 'pending_count DESC, last_activity_at DESC' : sort === 'recent_created' ? 'created_at DESC' : 'last_activity_at DESC';
-  const where = pendingOnly === 'true' ? 'WHERE pending_count > 0' : '';
+  const where = unreadOnly === 'true' ? "WHERE EXISTS (SELECT 1 FROM nodes WHERE trace_id=traces.id AND occurred_at > COALESCE(traces.last_viewed_at, ''))" : '';
   return { traces: db.prepare(`SELECT *,
     (SELECT COUNT(*) FROM nodes WHERE trace_id=traces.id) AS node_count,
     (SELECT COUNT(*) FROM nodes WHERE trace_id=traces.id AND occurred_at > COALESCE(traces.last_viewed_at, '')) AS unread_count

@@ -29,6 +29,18 @@ try { db.exec('ALTER TABLE traces ADD COLUMN last_viewed_at TEXT'); addedTraceVi
   if (!String(error.message).includes('duplicate column name')) throw error;
 }
 if (addedTraceViewColumn) db.prepare('UPDATE traces SET last_viewed_at=last_activity_at WHERE last_viewed_at IS NULL').run();
+try { db.exec('ALTER TABLE traces ADD COLUMN name TEXT'); } catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
+}
+// Backfill legacy/default titles from each chain's first report without
+// overwriting a name that was explicitly changed by the user.
+db.prepare(`UPDATE traces
+  SET name=COALESCE(
+    NULLIF(trim((SELECT input FROM nodes WHERE trace_id=traces.id ORDER BY occurred_at LIMIT 1)), ''),
+    NULLIF(trim((SELECT detail FROM nodes WHERE trace_id=traces.id ORDER BY occurred_at LIMIT 1)), ''),
+    title
+  )
+  WHERE name IS NULL OR trim(name)='' OR name=title`).run();
 
 const now = () => new Date().toISOString();
 const hash = (text) => createHash('sha256').update(text).digest('hex');
@@ -51,7 +63,7 @@ function seed() {
   addDevice.run('macbook-pro', 'MacBook Pro', hash('dev_mac_token'), 'online', at, at);
   addDevice.run('workstation-win', 'Windows Workstation', hash('dev_windows_token'), 'online', at, at);
   addDevice.run('mac-mini', 'Mac mini', hash('dev_mini_token'), 'offline', '2026-11-12T01:15:00.000Z', at);
-  const addTrace = db.prepare('INSERT INTO traces(id,title,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?)');
+  const addTrace = db.prepare('INSERT INTO traces(id,title,name,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?,?)');
   const addNode = db.prepare('INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const records = [
     ['trace-launch', '发布营销站', 'MacBook Pro · Codex', '2026-11-12T01:20:00.000Z', [
@@ -70,7 +82,7 @@ function seed() {
     ]]
   ];
   for (const [id, title, source, created, nodes] of records) {
-    addTrace.run(id, title, source, created, created, 0, created);
+    addTrace.run(id, title, title, source, created, created, 0, created);
     for (const node of nodes) addNode.run(node[0], id, ...node.slice(1));
     refreshTrace(id);
   }
@@ -115,13 +127,23 @@ app.post('/v1/traces/:traceId/view', (request, reply) => {
   db.prepare('UPDATE traces SET last_viewed_at=? WHERE id=?').run(now(), request.params.traceId);
   return { newNodeIds };
 });
+app.patch('/v1/traces/:traceId', (request, reply) => {
+  const name = typeof request.body?.name === 'string' ? request.body.name.trim() : '';
+  if (!name) return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: '汇报链名字不能为空' } });
+  if (name.length > 500) return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: '汇报链名字不能超过 500 个字符' } });
+  const result = db.prepare('UPDATE traces SET name=? WHERE id=?').run(name, request.params.traceId);
+  if (!result.changes) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: '汇报链不存在' } });
+  const trace = db.prepare('SELECT * FROM traces WHERE id=?').get(request.params.traceId);
+  emit('trace.updated', { traceId: trace.id, name: trace.name });
+  return { trace };
+});
 app.get('/v1/nodes/:nodeId', (request, reply) => {
-  const node = db.prepare(`SELECT n.*, d.name AS device_name, t.title AS trace_title FROM nodes n JOIN devices d ON d.id=n.device_id JOIN traces t ON t.id=n.trace_id WHERE n.id=?`).get(request.params.nodeId);
+  const node = db.prepare(`SELECT n.*, d.name AS device_name, t.name AS trace_title FROM nodes n JOIN devices d ON d.id=n.device_id JOIN traces t ON t.id=n.trace_id WHERE n.id=?`).get(request.params.nodeId);
   return node ? { node } : reply.code(404).send({ error: { code: 'NOT_FOUND', message: '节点不存在' } });
 });
 app.get('/v1/inbox', (request) => {
   const status = request.query.status || 'pending';
-  return { items: db.prepare(`SELECT n.*, t.title AS trace_title, d.name AS device_name FROM nodes n JOIN traces t ON t.id=n.trace_id JOIN devices d ON d.id=n.device_id WHERE n.status=? ORDER BY n.occurred_at DESC`).all(status === 'pending' ? 'blocked' : status) };
+  return { items: db.prepare(`SELECT n.*, t.name AS trace_title, d.name AS device_name FROM nodes n JOIN traces t ON t.id=n.trace_id JOIN devices d ON d.id=n.device_id WHERE n.status=? ORDER BY n.occurred_at DESC`).all(status === 'pending' ? 'blocked' : status) };
 });
 app.get('/v1/devices', () => ({ devices: db.prepare('SELECT id,name,state,last_seen_at,created_at FROM devices ORDER BY last_seen_at DESC').all() }));
 app.post('/v1/devices/pair', (request, reply) => {
@@ -143,8 +165,9 @@ app.post('/v1/reports', (request, reply) => {
   if (existing) return reply.code(200).send(JSON.parse(existing.response_json));
   const traceId = shortHash(`${device.id}|${input.app}|${input.sessionId}|${input.localTraceSeq || input.sessionId}`);
   const nodeId = randomUUID(); const timestamp = input.occurredAt; const source = `${device.name} · ${input.app}`;
+  const traceName = [input.input, input.detail, input.traceTitle, input.title].find((value) => typeof value === 'string' && value.trim())?.trim() || input.title;
   const write = db.transaction(() => {
-    db.prepare('INSERT OR IGNORE INTO traces(id,title,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?)').run(traceId, input.traceTitle || input.title, source, timestamp, timestamp, 0, null);
+    db.prepare('INSERT OR IGNORE INTO traces(id,title,name,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?,?)').run(traceId, input.traceTitle || input.title, traceName, source, timestamp, timestamp, 0, null);
     if (input.parentNodeId) { const parent = db.prepare('SELECT trace_id FROM nodes WHERE id=?').get(input.parentNodeId); if (!parent || parent.trace_id !== traceId) throw new Error('INVALID_PARENT'); }
     db.prepare('INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nodeId, traceId, input.parentNodeId || null, input.nodeType, input.nodeType === 'blocked' ? 'blocked' : 'completed', device.id, input.app, input.sessionId, timestamp, input.title, input.detail || '', input.input || null, input.conclusion || null, input.sourceUrl || null);
     db.prepare('UPDATE devices SET last_seen_at=?, state=? WHERE id=?').run(now(), 'online', device.id);

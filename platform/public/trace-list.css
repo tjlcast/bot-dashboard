@@ -1,0 +1,10 @@
+.trace-item { position: relative; }
+.trace-name { display: -webkit-box; padding-right: 28px; overflow: hidden; font-size: 14px; font-weight: 700; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.trace-source { color: #98a2b3 !important; font-size: 10px !important; }
+.trace-meta { color: #98a2b3 !important; }
+.trace-edit { position: absolute; top: 7px; right: 7px; z-index: 1; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: #98a2b3; font-size: 15px; line-height: 1; opacity: .7; }
+.trace-item:hover .trace-edit, .trace-edit:focus-visible { opacity: 1; }
+.trace-edit:hover { background: #eef2f6; color: var(--blue); }
+.trace.selected + .trace-edit:hover { background: #dce9ff; }
+.trace-new-dot { right: 37px; }
+.trace.unread .trace-row { padding-right: 38px; }

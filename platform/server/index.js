@@ -177,17 +177,35 @@ app.post('/v1/reports', (request, reply) => {
   if (!key) return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: '缺少 Idempotency-Key' } });
   const existing = db.prepare('SELECT response_json FROM idempotency_keys WHERE token_hash=? AND key=?').get(device.token_hash, key);
   if (existing) return reply.code(200).send(JSON.parse(existing.response_json));
-  const traceId = shortHash(`${device.id}|${input.app}|${input.sessionId}|${input.localTraceSeq || input.sessionId}`);
+  const defaultTraceId = shortHash(`${device.id}|${input.app}|${input.sessionId}|${input.localTraceSeq || input.sessionId}`);
   const nodeId = randomUUID(); const timestamp = input.occurredAt; const source = `${device.name} · ${input.app}`;
   const traceName = [input.input, input.detail, input.traceTitle, input.title].find((value) => typeof value === 'string' && value.trim())?.trim() || input.title;
+  let traceId = defaultTraceId;
+  let parentNodeId = null;
+  if (input.parentNodeId) {
+    const parent = db.prepare('SELECT id,trace_id,device_id,app,session_id FROM nodes WHERE id=?').get(input.parentNodeId);
+    if (parent) {
+      // A parent can only continue the exact client session that created it.
+      // The trace itself may be a recovery trace rather than the default one.
+      if (parent.device_id !== device.id || parent.app !== input.app || parent.session_id !== input.sessionId) {
+        return reply.code(422).send({ error: { code: 'INVALID_PARENT', message: 'Parent node does not belong to this device or session' } });
+      }
+      traceId = parent.trace_id;
+      parentNodeId = parent.id;
+    } else {
+      // A redeployed Platform can lose node history while clients retain a
+      // parent ID. Isolate this report in a recovery trace; later reports
+      // attach through the node ID returned below.
+      traceId = shortHash(`${defaultTraceId}|recovery|${nodeId}`);
+    }
+  }
   const write = db.transaction(() => {
     db.prepare('INSERT OR IGNORE INTO traces(id,title,name,source_summary,created_at,last_activity_at,pending_count,last_viewed_at) VALUES(?,?,?,?,?,?,?,?)').run(traceId, input.traceTitle || input.title, traceName, source, timestamp, timestamp, 0, null);
-    if (input.parentNodeId) { const parent = db.prepare('SELECT trace_id FROM nodes WHERE id=?').get(input.parentNodeId); if (!parent || parent.trace_id !== traceId) throw new Error('INVALID_PARENT'); }
-    db.prepare('INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nodeId, traceId, input.parentNodeId || null, input.nodeType, input.nodeType === 'blocked' ? 'blocked' : 'completed', device.id, input.app, input.sessionId, timestamp, input.title, input.detail || '', input.input || null, input.conclusion || null, input.sourceUrl || null);
+    db.prepare('INSERT INTO nodes VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(nodeId, traceId, parentNodeId, input.nodeType, input.nodeType === 'blocked' ? 'blocked' : 'completed', device.id, input.app, input.sessionId, timestamp, input.title, input.detail || '', input.input || null, input.conclusion || null, input.sourceUrl || null);
     db.prepare('UPDATE devices SET last_seen_at=?, state=? WHERE id=?').run(now(), 'online', device.id);
     refreshTrace(traceId);
   });
-  try { write(); } catch (error) { return reply.code(error.message === 'INVALID_PARENT' ? 422 : 500).send({ error: { code: error.message === 'INVALID_PARENT' ? 'INVALID_PARENT' : 'STORAGE_ERROR', message: error.message } }); }
+  try { write(); } catch (error) { return reply.code(500).send({ error: { code: 'STORAGE_ERROR', message: error.message } }); }
   const response = { traceId, nodeId, createdAt: now(), status: input.nodeType === 'blocked' ? 'blocked' : 'completed' };
   db.prepare('INSERT INTO idempotency_keys VALUES(?,?,?,?)').run(device.token_hash, key, JSON.stringify(response), new Date(Date.now() + 86400000).toISOString());
   emit('node.created', { traceId, nodeId });

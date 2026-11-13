@@ -1,0 +1,56 @@
+name: Build and deploy Platform
+
+on:
+  push:
+    branches:
+      - deploy
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: agent-control-plane:${{ github.sha }}
+      SSH_HOST: ${{ secrets.ALIYUN_SSH_HOST }}
+      SSH_USER: ${{ secrets.ALIYUN_SSH_USER }}
+      SSH_PORT: ${{ secrets.ALIYUN_SSH_PORT }}
+      SSHPASS: ${{ secrets.ALIYUN_SSH_PASSWORD }}
+      DEPLOY_DIR: ${{ vars.ALIYUN_DEPLOY_PATH }}
+      PLATFORM_PORT: ${{ vars.PLATFORM_PORT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the Platform image
+        working-directory: platform
+        run: docker build -f docker/Dockerfile -t "$IMAGE_TAG" .
+
+      - name: Package the image
+        run: docker save "$IMAGE_TAG" | gzip > "$RUNNER_TEMP/platform-image.tar.gz"
+
+      - name: Configure SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Transfer and deploy
+        run: |
+          set -euo pipefail
+          SSH_PORT="${SSH_PORT:-22}"
+          DEPLOY_DIR="${DEPLOY_DIR:-/opt/agent-control-plane}"
+          PLATFORM_PORT="${PLATFORM_PORT:-3000}"
+          SSH_TARGET="$SSH_USER@$SSH_HOST"
+
+          SSH_OPTIONS=(-o PreferredAuthentications=password -o PubkeyAuthentication=no -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+          sshpass -e ssh "${SSH_OPTIONS[@]}" -p "$SSH_PORT" "$SSH_TARGET" "mkdir -p '$DEPLOY_DIR'"
+          sshpass -e scp "${SSH_OPTIONS[@]}" -P "$SSH_PORT" "$RUNNER_TEMP/platform-image.tar.gz" "$SSH_TARGET:$DEPLOY_DIR/platform-image.tar.gz"
+          sshpass -e scp "${SSH_OPTIONS[@]}" -P "$SSH_PORT" platform/githubaction/compose.server.yaml "$SSH_TARGET:$DEPLOY_DIR/compose.server.yaml"
+          sshpass -e ssh "${SSH_OPTIONS[@]}" -p "$SSH_PORT" "$SSH_TARGET" "DEPLOY_DIR='$DEPLOY_DIR' PLATFORM_IMAGE='$IMAGE_TAG' PLATFORM_PORT='$PLATFORM_PORT' bash -s" < platform/githubaction/deploy.sh

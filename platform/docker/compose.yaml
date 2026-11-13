@@ -1,0 +1,18 @@
+services:
+  platform:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: agent-control-plane:local
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      # Set to true only when a fresh demo database is desired.
+      # SEED_DEMO: "true"
+    volumes:
+      - platform-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  platform-data:

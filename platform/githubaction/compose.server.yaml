@@ -1,0 +1,13 @@
+services:
+  platform:
+    image: ${PLATFORM_IMAGE:?PLATFORM_IMAGE must be set}
+    ports:
+      - "${PLATFORM_PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+    volumes:
+      - platform-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  platform-data:

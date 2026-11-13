@@ -73,6 +73,7 @@ paseo plugin install .
 未设置 `ACP_DEVICE_TOKEN` 时，插件在首次上报前调用 `/devices/pair` 自动创建平台设备。它将以下内容保存到本地状态文件：
 
 - `deviceId` 和 device token；
+- token 所属的 Agent Control Plane API 地址；
 - 未发送成功的上报 outbox；
 - Paseo `messageId -> 平台 nodeId` 映射，用于恢复链路与回退分支。
 
@@ -89,6 +90,8 @@ $PASEO_HOME/plugins/paseo-reporter/state.json
 ```
 
 状态文件包含访问 token；应只允许运行 Paseo daemon 的用户读取。不要将它提交到版本控制或发送给他人。
+
+如果 `ACP_API_URL` 改为另一套平台部署，插件会自动发现已保存 credential 的地址与当前地址不一致：旧 token 与旧节点映射会被废弃，待发送 outbox 会保留；随后插件使用当前 `ACP_DEVICE_NAME` 在新平台自动配对并重新按顺序上报。这避免旧平台 token 在新平台反复得到 `401`。
 
 ## 上报与链路行为
 

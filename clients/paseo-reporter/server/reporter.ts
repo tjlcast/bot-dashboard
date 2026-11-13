@@ -11,7 +11,7 @@ export type PaseoAgent = {
   cwd: string;
 };
 
-type Credential = { deviceId: string; token: string; pairedAt: string };
+type Credential = { deviceId: string; token: string; pairedAt: string; apiBase?: string };
 type PendingReport = {
   idempotencyKey: string;
   body: ReportBody;
@@ -21,7 +21,7 @@ type PendingReport = {
   attempts: number;
 };
 type PersistedState = {
-  version: 1;
+  version: 2;
   credential?: Credential;
   pending: PendingReport[];
   /** Paseo assistant message ID -> Agent Control Plane node ID. */
@@ -50,7 +50,7 @@ let state: PersistedState | undefined;
 let serial = Promise.resolve();
 
 function defaultState(): PersistedState {
-  return { version: 1, pending: [], nodeIdByMessageId: {} };
+  return { version: 2, pending: [], nodeIdByMessageId: {} };
 }
 
 async function loadState(): Promise<PersistedState> {
@@ -58,7 +58,7 @@ async function loadState(): Promise<PersistedState> {
   try {
     const parsed = JSON.parse(await readFile(statePath, 'utf8')) as Partial<PersistedState>;
     state = {
-      version: 1,
+      version: 2,
       credential: parsed.credential,
       pending: Array.isArray(parsed.pending) ? parsed.pending : [],
       nodeIdByMessageId: parsed.nodeIdByMessageId && typeof parsed.nodeIdByMessageId === 'object'
@@ -88,17 +88,25 @@ async function api<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 async function credential(): Promise<Credential> {
-  const configuredToken = process.env.ACP_DEVICE_TOKEN;
-  if (configuredToken) return { deviceId: 'configured', token: configuredToken, pairedAt: '' };
-
   const saved = await loadState();
+  // A device token belongs to one Agent Control Plane deployment. Reusing it
+  // after ACP_API_URL changes produces silent 401 retries and invalid parents.
+  // Old state files lack apiBase, so treat them as belonging to an unknown API.
+  if (saved.credential && saved.credential.apiBase !== apiBase) {
+    saved.credential = undefined;
+    saved.nodeIdByMessageId = {};
+    await saveState();
+  }
+
+  const configuredToken = process.env.ACP_DEVICE_TOKEN;
+  if (configuredToken) return { deviceId: 'configured', token: configuredToken, pairedAt: '', apiBase };
   if (saved.credential) return saved.credential;
   const paired = await api<{ deviceId: string; token: string; createdAt: string }>('/devices/pair', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: deviceName })
   });
-  saved.credential = { deviceId: paired.deviceId, token: paired.token, pairedAt: paired.createdAt };
+  saved.credential = { deviceId: paired.deviceId, token: paired.token, pairedAt: paired.createdAt, apiBase };
   await saveState();
   return saved.credential;
 }

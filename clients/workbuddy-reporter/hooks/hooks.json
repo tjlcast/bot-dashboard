@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CODEBUDDY_PLUGIN_ROOT}/scripts/report.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

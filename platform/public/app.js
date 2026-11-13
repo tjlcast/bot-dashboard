@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const app = $('#app');
 const notificationPreferenceKey = 'platform-system-notifications';
 const savedNotificationPreference = () => { try { return localStorage.getItem(notificationPreferenceKey) === 'enabled'; } catch { return false; } };
-const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: true, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference() };
+const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null };
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
 const time = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); };
 const typeName = { report: '汇报', decision: '结论', checkpoint: '检查点', blocked: '待介入' };
@@ -10,7 +10,7 @@ async function api(path, options) { const r = await fetch(`/v1${path}`, options)
 function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600); }
 function nav(active) { return `<nav class="side"><div class="brand">A</div><button class="nav ${active === 'workspace' ? 'active' : ''}" data-page="workspace" title="工作台">⌘</button><button class="nav ${active === 'inbox' ? 'active' : ''}" data-page="inbox" title="收件箱">▣</button><button class="nav ${active === 'devices' ? 'active' : ''}" data-page="devices" title="接入">⌁</button><button class="nav bottom ${state.settingsOpen ? 'active' : ''}" data-settings title="设置">⚙</button></nav>`; }
 async function loadTraces() { state.traces = (await api(`/traces?sort=${state.sort}&unreadOnly=${state.unreadOnly}`)).traces; state.selectedTraceIds = new Set([...state.selectedTraceIds].filter((id) => state.traces.some((trace) => trace.id === id))); if (!state.selectedTrace || !state.traces.some((x) => x.id === state.selectedTrace)) state.selectedTrace = state.traces[0]?.id; }
-async function loadNodes() { if (!state.selectedTrace) return; state.nodes = (await api(`/traces/${state.selectedTrace}/nodes`)).nodes; if (!state.selectedNode || !state.nodes.some((x) => x.id === state.selectedNode)) state.selectedNode = state.nodes.find((x) => x.status === 'blocked')?.id || state.nodes.at(-1)?.id; }
+async function loadNodes() { if (!state.selectedTrace) return; state.nodes = (await api(`/traces/${state.selectedTrace}/nodes`)).nodes; if (state.selectedNode && !state.nodes.some((node) => node.id === state.selectedNode)) state.selectedNode = null; }
 const traceName = (trace) => trace.name || trace.title;
 const displayTraceName = (trace) => { const name = traceName(trace); const characters = Array.from(name); return characters.length > 20 ? `${characters.slice(0, 20).join('')}…` : name; };
 const nodeContext = (node) => (node.input || node.detail || node.title || '').trim();
@@ -40,12 +40,22 @@ async function workspace() {
   const filters = `<div class="filters"><button class="filter ${!state.unreadOnly ? 'active' : ''}" data-unread="false">全部</button><button class="filter ${state.unreadOnly ? 'active' : ''}" data-unread="true">有新汇报</button></div>`;
   app.innerHTML = `<div class="shell">${nav('workspace')}<main class="main"><header class="top"><div><div class="title" title="${esc(trace ? traceName(trace) : '工作台')}">${traceHeading}</div><div class="eyebrow">${esc(trace?.source_summary || '选择一条汇报链')} · ${trace?.node_count || 0} 个节点</div></div><div class="toolbar"><button class="tiny" data-fit>适应画板</button><button class="tiny" data-refresh>刷新</button></div></header>${canvas()}</main><aside class="traces"><div class="trace-head"><div class="trace-list-title"><h2>汇报链</h2><div class="trace-list-actions"><button class="tiny" data-toggle-multi-select>${state.multiSelectMode ? '取消多选' : '多选'}</button>${state.multiSelectMode ? `<button class="tiny danger" data-delete-selected ${selectedCount ? '' : 'disabled'}>删除${selectedCount ? `（${selectedCount}）` : ''}</button>` : ''}</div></div>${filters}<select class="sort" id="sort"><option value="recent_activity">最近活跃</option><option value="pending_first">待介入优先</option><option value="recent_created">最近创建</option></select></div><div class="trace-list">${traceList()}</div><div class="live"><i class="online"></i>实时同步正常</div></aside></div>${drawer()}${settingsMenu()}`;
   $('#sort').value = state.sort;
-  const view = state.canvasViewByTrace[state.selectedTrace];
-  if (view) { const canvas = $('.canvas'); canvas.scrollLeft = view.left; canvas.scrollTop = view.top; }
+  const canvasElement = $('.canvas');
+  const focusNode = state.nodes.find((node) => node.id === state.focusNodeId);
+  const position = focusNode ? positions(state.nodes).get(focusNode.id) : null;
+  if (focusNode && position) {
+    canvasElement.scrollLeft = Math.max(0, position.x + 85 - canvasElement.clientWidth / 2);
+    canvasElement.scrollTop = Math.max(0, position.y + 48 - canvasElement.clientHeight / 2);
+    state.canvasViewByTrace[state.selectedTrace] = { left: canvasElement.scrollLeft, top: canvasElement.scrollTop };
+    state.focusNodeId = null;
+  } else {
+    const view = state.canvasViewByTrace[state.selectedTrace];
+    if (view) { canvasElement.scrollLeft = view.left; canvasElement.scrollTop = view.top; }
+  }
   bind();
   const nameInput = $('#trace-name-input'); if (nameInput) { nameInput.focus(); nameInput.select(); }
 }
-async function viewTrace(traceId) { const { newNodeIds } = await api(`/traces/${traceId}/view`, { method: 'POST' }); state.newNodeIdsByTrace[traceId] = newNodeIds; }
+async function viewTrace(traceId) { const { newNodeIds } = await api(`/traces/${traceId}/view`, { method: 'POST' }); state.newNodeIdsByTrace[traceId] = newNodeIds; return newNodeIds; }
 async function updateTraceName(traceId, name) { const trimmed = name.trim(); if (!trimmed) return toast('汇报链名字不能为空'); try { await api(`/traces/${traceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed }) }); state.editingTraceName = null; toast('汇报链名字已更新'); await workspace(); } catch (error) { toast(error.message); } }
 async function renameTrace(traceId) { const trace = state.traces.find((item) => item.id === traceId); const name = prompt('修改汇报链名字', traceName(trace)); if (name !== null) await updateTraceName(traceId, name); }
 async function deleteTraces(traceIds) { const traces = traceIds.map((id) => state.traces.find((trace) => trace.id === id)).filter(Boolean); if (!traces.length) return; const names = traces.map((trace) => `• ${traceName(trace)}`).join('\n'); const label = traces.length === 1 ? '此汇报链' : `这 ${traces.length} 条汇报链`; if (!confirm(`确认删除${label}吗？\n\n${names}\n\n将同时删除其中全部汇报节点、节点详情与人工介入记录。此操作无法撤销。`)) return; try { await api('/traces', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ traceIds }) }); traceIds.forEach((id) => { state.selectedTraceIds.delete(id); delete state.canvasViewByTrace[id]; delete state.newNodeIdsByTrace[id]; }); state.selectedNode = null; state.drawerOpen = false; toast(`已删除 ${traces.length} 条汇报链`); await workspace(); } catch (error) { toast(error.message); } }
@@ -74,7 +84,7 @@ function bindCanvasPan() {
 }
 function bind() {
   document.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => navigate(b.dataset.page));
-  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.selectedNode = null; state.drawerOpen = true; await workspace(); });
+  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { const newNodeIds = await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.focusNodeId = newNodeIds.at(-1) || null; state.selectedNode = null; state.drawerOpen = false; await workspace(); });
   const currentTraceEditor = $('[data-edit-current-trace]'); if (currentTraceEditor) currentTraceEditor.onclick = () => { state.editingTraceName = state.selectedTrace; workspace(); };
   const traceNameEditor = $('[data-trace-name-editor]'); if (traceNameEditor) traceNameEditor.onsubmit = (event) => { event.preventDefault(); updateTraceName(traceNameEditor.dataset.traceNameEditor, $('#trace-name-input').value); };
   document.querySelectorAll('[data-cancel-trace-name]').forEach((b) => b.onclick = () => { state.editingTraceName = null; workspace(); });

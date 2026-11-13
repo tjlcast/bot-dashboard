@@ -1,0 +1,9 @@
+.trace-list-title, .trace-list-actions { display: flex; align-items: center; gap: 8px; }
+.trace-list-title { justify-content: space-between; }
+.tiny.danger, .btn.danger { border-color: #f1b5b5; color: #b42318; }
+.tiny.danger:disabled { cursor: not-allowed; opacity: .45; }
+.trace-select { position: absolute; z-index: 2; top: 12px; left: 11px; display: grid; width: 18px; height: 18px; place-items: center; }
+.trace-select input { width: 14px; height: 14px; margin: 0; accent-color: var(--blue); }
+.trace-item.multi-selecting .trace { padding-left: 36px; }
+.danger-zone p { margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

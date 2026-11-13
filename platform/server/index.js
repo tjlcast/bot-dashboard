@@ -127,6 +127,20 @@ app.post('/v1/traces/:traceId/view', (request, reply) => {
   db.prepare('UPDATE traces SET last_viewed_at=? WHERE id=?').run(now(), request.params.traceId);
   return { newNodeIds };
 });
+app.delete('/v1/traces', (request, reply) => {
+  const traceIds = [...new Set(Array.isArray(request.body?.traceIds) ? request.body.traceIds.filter((id) => typeof id === 'string' && id) : [])];
+  if (!traceIds.length) return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: '至少选择一条汇报链' } });
+  const placeholders = traceIds.map(() => '?').join(',');
+  const found = db.prepare(`SELECT id FROM traces WHERE id IN (${placeholders})`).all(...traceIds).map((trace) => trace.id);
+  if (found.length !== traceIds.length) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: '部分汇报链不存在' } });
+  db.transaction(() => {
+    db.prepare(`DELETE FROM interventions WHERE node_id IN (SELECT id FROM nodes WHERE trace_id IN (${placeholders}))`).run(...traceIds);
+    db.prepare(`DELETE FROM nodes WHERE trace_id IN (${placeholders})`).run(...traceIds);
+    db.prepare(`DELETE FROM traces WHERE id IN (${placeholders})`).run(...traceIds);
+  })();
+  emit('trace.deleted', { traceIds });
+  return { deletedTraceIds: traceIds };
+});
 app.patch('/v1/traces/:traceId', (request, reply) => {
   const name = typeof request.body?.name === 'string' ? request.body.name.trim() : '';
   if (!name) return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: '汇报链名字不能为空' } });

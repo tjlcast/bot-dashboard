@@ -80,6 +80,7 @@ async function loadState() {
     const parsed = JSON.parse(await readFile(STATE_PATH, 'utf8'));
     return {
       version: 1,
+      apiBase: typeof parsed.apiBase === 'string' ? parsed.apiBase : undefined,
       credential: parsed.credential,
       pending: Array.isArray(parsed.pending) ? parsed.pending : [],
       nodeIdByMessageId: parsed.nodeIdByMessageId && typeof parsed.nodeIdByMessageId === 'object'
@@ -88,7 +89,7 @@ async function loadState() {
     };
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
-    return { version: 1, pending: [], nodeIdByMessageId: {} };
+    return { version: 1, apiBase: undefined, pending: [], nodeIdByMessageId: {} };
   }
 }
 
@@ -102,12 +103,27 @@ async function saveState(state) {
 async function api(path, init) {
   const response = await fetch(`${API_BASE}${path}`, init);
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error?.message ?? `Agent Control Plane request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(body.error?.message ?? `Agent Control Plane request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
+async function reconcileApiBase(state) {
+  if (state.apiBase === API_BASE) return;
+
+  // A device token and platform node IDs belong to one server/database.  Do not
+  // send them to a newly configured platform; retain the outbox for replay.
+  state.apiBase = API_BASE;
+  delete state.credential;
+  state.nodeIdByMessageId = {};
+  await saveState(state);
+}
+
 async function credential(state) {
-  if (process.env.ACP_DEVICE_TOKEN) return { token: process.env.ACP_DEVICE_TOKEN };
+  if (process.env.ACP_DEVICE_TOKEN) return { token: process.env.ACP_DEVICE_TOKEN, external: true };
   if (state.credential) return state.credential;
   const paired = await api('/devices/pair', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: DEVICE_NAME })
@@ -118,7 +134,8 @@ async function credential(state) {
 }
 
 async function flushPending(state) {
-  const auth = await credential(state);
+  let auth = await credential(state);
+  let pairedAfterUnauthorized = false;
   while (state.pending.length) {
     const report = state.pending[0];
     try {
@@ -136,6 +153,16 @@ async function flushPending(state) {
       state.pending.shift();
       await saveState(state);
     } catch (error) {
+      // A platform can be redeployed with an empty database without changing
+      // its URL. Pair once more and replay the same queued report.
+      if (error?.status === 401 && !auth.external && !pairedAfterUnauthorized) {
+        pairedAfterUnauthorized = true;
+        delete state.credential;
+        state.nodeIdByMessageId = {};
+        await saveState(state);
+        auth = await credential(state);
+        continue;
+      }
       report.attempts += 1;
       await saveState(state);
       console.error(`[workbuddy-reporter] report deferred: ${error instanceof Error ? error.message : String(error)}`);
@@ -164,6 +191,7 @@ async function main() {
   if (!turn.assistantText) return;
 
   const state = await loadState();
+  await reconcileApiBase(state);
   if (turn.messageId && state.nodeIdByMessageId[turn.messageId]) return;
   const key = reportKey(input.session_id, turn);
   if (!state.pending.some((report) => report.idempotencyKey === key)) {

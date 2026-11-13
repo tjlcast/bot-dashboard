@@ -103,6 +103,12 @@ C:\Users\<用户名>\.workbuddy\plugins\workbuddy-reporter\state.json
 
 可通过 `ACP_WORKBUDDY_REPORTER_STATE_PATH` 覆盖此位置。
 
+### 平台地址变更与凭据恢复
+
+状态文件会记录最近一次配对所使用的 `ACP_API_URL`。当该地址发生变化时，Reporter 会自动清除旧平台的设备凭据和 `messageId → nodeId` 映射，并以当前 `ACP_DEVICE_NAME` 重新配对；待发送的上报会保留并发送到新平台。
+
+如果平台地址不变、但服务端数据库被重置而返回 `401`，Reporter 也会自动重新配对一次后重试。显式设置 `ACP_DEVICE_TOKEN` 时，该 Token 由使用者管理；收到 `401` 不会自动替换它。
+
 ## 升级
 
 修改仓库中的 `scripts/report.mjs` 后，重新执行安装步骤 1 的复制命令覆盖已安装脚本，然后重启 WorkBuddy。已有状态文件会保留，因此映射和待重试事件不会丢失。

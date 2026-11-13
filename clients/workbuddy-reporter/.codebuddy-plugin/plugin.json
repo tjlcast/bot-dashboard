@@ -1,6 +1,0 @@
-{
-  "name": "workbuddy-reporter",
-  "version": "0.1.0",
-  "description": "Report completed WorkBuddy text replies to Agent Control Plane.",
-  "keywords": ["reporting", "telemetry", "agent-control-plane"]
-}

@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const app = $('#app');
 const notificationPreferenceKey = 'platform-system-notifications';
 const savedNotificationPreference = () => { try { return localStorage.getItem(notificationPreferenceKey) === 'enabled'; } catch { return false; } };
-const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null };
+const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null };
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
 const time = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); };
 const typeName = { report: '汇报', decision: '结论', checkpoint: '检查点', blocked: '待介入' };
@@ -38,7 +38,7 @@ async function workspace() {
     ? `<form class="trace-name-editor" data-trace-name-editor="${trace.id}"><input id="trace-name-input" value="${esc(traceName(trace))}" aria-label="汇报链名字" maxlength="500" /><button class="tiny primary" type="submit">保存</button><button class="tiny" type="button" data-cancel-trace-name>取消</button></form>`
     : `<button class="trace-heading" type="button" data-edit-current-trace title="点击修改汇报链名字">${esc(trace ? displayTraceName(trace) : '工作台')}</button>`;
   const filters = `<div class="filters"><button class="filter ${!state.unreadOnly ? 'active' : ''}" data-unread="false">全部</button><button class="filter ${state.unreadOnly ? 'active' : ''}" data-unread="true">有新汇报</button></div>`;
-  app.innerHTML = `<div class="shell">${nav('workspace')}<main class="main"><header class="top"><div><div class="title" title="${esc(trace ? traceName(trace) : '工作台')}">${traceHeading}</div><div class="eyebrow">${esc(trace?.source_summary || '选择一条汇报链')} · ${trace?.node_count || 0} 个节点</div></div><div class="toolbar"><button class="tiny" data-fit>适应画板</button><button class="tiny" data-refresh>刷新</button></div></header>${canvas()}</main><aside class="traces"><div class="trace-head"><div class="trace-list-title"><h2>汇报链</h2><div class="trace-list-actions"><button class="tiny" data-toggle-multi-select>${state.multiSelectMode ? '取消多选' : '多选'}</button>${state.multiSelectMode ? `<button class="tiny" data-select-all>全部选择</button><button class="tiny danger" data-delete-selected ${selectedCount ? '' : 'disabled'}>删除${selectedCount ? `（${selectedCount}）` : ''}</button>` : ''}</div></div>${filters}<select class="sort" id="sort"><option value="recent_activity">最近活跃</option><option value="pending_first">待介入优先</option><option value="recent_created">最近创建</option></select></div><div class="trace-list">${traceList()}</div><div class="live"><i class="online"></i>实时同步正常</div></aside></div>${drawer()}${settingsMenu()}`;
+  app.innerHTML = `<div class="shell">${nav('workspace')}<main class="main"><header class="top"><div class="top-title"><div class="title" title="${esc(trace ? traceName(trace) : '工作台')}">${traceHeading}</div><div class="eyebrow">${esc(trace?.source_summary || '选择一条汇报链')} · ${trace?.node_count || 0} 个节点</div></div><div class="toolbar"><button class="tiny mobile-traces-trigger" data-mobile-traces>汇报链</button><button class="tiny" data-fit>适应画板</button><button class="tiny" data-refresh>刷新</button></div></header>${canvas()}</main><div class="mobile-traces-backdrop ${state.mobileTracesOpen ? 'open' : ''}" data-close-mobile-traces></div><aside class="traces ${state.mobileTracesOpen ? 'open' : ''}" aria-label="汇报链"><div class="trace-head"><div class="trace-list-title"><h2>汇报链</h2><div class="trace-list-actions"><button class="tiny mobile-traces-close" data-close-mobile-traces aria-label="关闭汇报链">×</button><button class="tiny" data-toggle-multi-select>${state.multiSelectMode ? '取消多选' : '多选'}</button>${state.multiSelectMode ? `<button class="tiny" data-select-all>全部选择</button><button class="tiny danger" data-delete-selected ${selectedCount ? '' : 'disabled'}>删除${selectedCount ? `（${selectedCount}）` : ''}</button>` : ''}</div></div>${filters}<select class="sort" id="sort"><option value="recent_activity">最近活跃</option><option value="pending_first">待介入优先</option><option value="recent_created">最近创建</option></select></div><div class="trace-list">${traceList()}</div><div class="live"><i class="online"></i>实时同步正常</div></aside></div>${drawer()}${settingsMenu()}`;
   $('#sort').value = state.sort;
   const canvasElement = $('.canvas');
   const focusNode = state.nodes.find((node) => node.id === state.focusNodeId);
@@ -84,7 +84,9 @@ function bindCanvasPan() {
 }
 function bind() {
   document.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => navigate(b.dataset.page));
-  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { const newNodeIds = await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.focusNodeId = newNodeIds.at(-1) || null; state.selectedNode = null; state.drawerOpen = false; await workspace(); });
+  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { const newNodeIds = await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.focusNodeId = newNodeIds.at(-1) || null; state.selectedNode = null; state.drawerOpen = false; state.mobileTracesOpen = false; await workspace(); });
+  const openMobileTraces = $('[data-mobile-traces]'); if (openMobileTraces) openMobileTraces.onclick = () => { state.mobileTracesOpen = true; workspace(); };
+  document.querySelectorAll('[data-close-mobile-traces]').forEach((b) => b.onclick = () => { state.mobileTracesOpen = false; workspace(); });
   const currentTraceEditor = $('[data-edit-current-trace]'); if (currentTraceEditor) currentTraceEditor.onclick = () => { state.editingTraceName = state.selectedTrace; workspace(); };
   const traceNameEditor = $('[data-trace-name-editor]'); if (traceNameEditor) traceNameEditor.onsubmit = (event) => { event.preventDefault(); updateTraceName(traceNameEditor.dataset.traceNameEditor, $('#trace-name-input').value); };
   document.querySelectorAll('[data-cancel-trace-name]').forEach((b) => b.onclick = () => { state.editingTraceName = null; workspace(); });
@@ -99,6 +101,16 @@ function bind() {
   const sort = $('#sort'); if (sort) sort.onchange = async () => { state.sort = sort.value; await workspace(); };
   document.querySelectorAll('[data-close]').forEach((b) => b.onclick = () => { state.drawerOpen = false; workspace(); });
   const refresh = $('[data-refresh]'); if (refresh) refresh.onclick = workspace;
+  const fit = $('[data-fit]'); if (fit) fit.onclick = () => {
+    const canvas = $('.canvas');
+    if (!canvas || !state.nodes.length) return;
+    const layout = positions(state.nodes);
+    const points = [...layout.values()];
+    const left = Math.min(...points.map((p) => p.x)); const right = Math.max(...points.map((p) => p.x + 170));
+    const top = Math.min(...points.map((p) => p.y)); const bottom = Math.max(...points.map((p) => p.y + 96));
+    canvas.scrollLeft = Math.max(0, (left + right - canvas.clientWidth) / 2);
+    canvas.scrollTop = Math.max(0, (top + bottom - canvas.clientHeight) / 2);
+  };
   const send = $('[data-send]'); if (send) send.onclick = () => sendIntervention(send.dataset.send);
   bindCanvasPan();
 }
@@ -111,5 +123,5 @@ stream.addEventListener('node.created', (event) => { notifyNewReport(event); if 
 ['node.updated', 'intervention.created', 'device.updated', 'trace.updated', 'trace.deleted'].forEach((type) => stream.addEventListener(type, () => { if (state.page === 'workspace') workspace(); }));
 document.addEventListener('click', (event) => { const settings = event.target.closest('[data-settings]'); if (!settings) return; state.settingsOpen = !state.settingsOpen; state.page = 'workspace'; workspace(); });
 document.addEventListener('change', (event) => { if (event.target.matches('input[name="system-notifications"]')) setSystemNotifications(event.target.value === 'enabled'); });
-document.addEventListener('keydown', (event) => { if (event.key !== 'Escape' || state.page !== 'workspace') return; if (state.editingTraceName) { state.editingTraceName = null; workspace(); return; } if (state.drawerOpen && state.selectedNode) { state.drawerOpen = false; workspace(); } });
+document.addEventListener('keydown', (event) => { if (event.key !== 'Escape' || state.page !== 'workspace') return; if (state.mobileTracesOpen) { state.mobileTracesOpen = false; workspace(); return; } if (state.editingTraceName) { state.editingTraceName = null; workspace(); return; } if (state.drawerOpen && state.selectedNode) { state.drawerOpen = false; workspace(); } });
 navigate('workspace');

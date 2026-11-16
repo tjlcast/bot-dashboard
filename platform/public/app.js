@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const app = $('#app');
 const notificationPreferenceKey = 'platform-system-notifications';
 const savedNotificationPreference = () => { try { return localStorage.getItem(notificationPreferenceKey) === 'enabled'; } catch { return false; } };
-const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null };
+const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null, focusLatestNode: false };
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
 const time = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); };
 const typeName = { report: '汇报', decision: '结论', checkpoint: '检查点', blocked: '待介入' };
@@ -32,6 +32,10 @@ function drawer() { const n = state.nodes.find((x) => x.id === state.selectedNod
 function settingsMenu() { if (!state.settingsOpen) return ''; const supported = 'Notification' in window; return `<section class="settings-menu" aria-label="设置"><h2>设置</h2><fieldset ${supported ? '' : 'disabled'}><legend>系统提示</legend><label><input type="radio" name="system-notifications" value="enabled" ${state.systemNotifications ? 'checked' : ''} /> 开启系统提示</label><label><input type="radio" name="system-notifications" value="disabled" ${state.systemNotifications ? '' : 'checked'} /> 关闭系统提示</label></fieldset>${supported ? '<p>开启后，浏览器会在收到新汇报时发出系统通知。</p>' : '<p>当前浏览器不支持系统提示。</p>'}</section>`; }
 async function workspace() {
   await loadTraces(); await loadNodes();
+  if (state.focusLatestNode) {
+    state.focusNodeId = state.nodes.length ? state.nodes.reduce((latest, node) => new Date(node.occurred_at) > new Date(latest.occurred_at) ? node : latest).id : null;
+    state.focusLatestNode = false;
+  }
   const trace = state.traces.find((t) => t.id === state.selectedTrace);
   const selectedCount = state.selectedTraceIds.size;
   const traceHeading = trace && state.editingTraceName === trace.id
@@ -84,7 +88,7 @@ function bindCanvasPan() {
 }
 function bind() {
   document.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => navigate(b.dataset.page));
-  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { const newNodeIds = await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.focusNodeId = newNodeIds.at(-1) || null; state.selectedNode = null; state.drawerOpen = false; state.mobileTracesOpen = false; await workspace(); });
+  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.focusNodeId = null; state.focusLatestNode = true; state.selectedNode = null; state.drawerOpen = false; state.mobileTracesOpen = false; await workspace(); });
   const openMobileTraces = $('[data-mobile-traces]'); if (openMobileTraces) openMobileTraces.onclick = () => { state.mobileTracesOpen = true; workspace(); };
   document.querySelectorAll('[data-close-mobile-traces]').forEach((b) => b.onclick = () => { state.mobileTracesOpen = false; workspace(); });
   const currentTraceEditor = $('[data-edit-current-trace]'); if (currentTraceEditor) currentTraceEditor.onclick = () => { state.editingTraceName = state.selectedTrace; workspace(); };

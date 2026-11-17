@@ -73,6 +73,7 @@ async function workspace() {
   renderViewMode();
   if (state.viewMode === 'conversation') {
     bind();
+    bindConversationCollapsing();
     const nameInput = $('#trace-name-input'); if (nameInput) { nameInput.focus(); nameInput.select(); }
     return;
   }
@@ -210,6 +211,24 @@ function conversationNodes() {
   }).map(({ node }) => node);
 }
 
+function bindConversationCollapsing() {
+  document.querySelectorAll('.conversation-bubble').forEach((bubble) => {
+    const content = bubble.querySelector('.conversation-content');
+    if (!content || content.scrollHeight <= content.clientHeight + 1) return;
+    bubble.classList.add('is-truncatable');
+    bubble.setAttribute('aria-expanded', 'false');
+    const toggle = () => {
+      const expanded = bubble.classList.toggle('is-expanded');
+      bubble.setAttribute('aria-expanded', String(expanded));
+    };
+    bubble.ondblclick = (event) => { event.preventDefault(); toggle(); };
+    bubble.onkeydown = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault(); toggle();
+    };
+  });
+}
+
 function conversation() {
   const nodes = conversationNodes();
   if (!nodes.length) return '<section class="conversation"><div class="conversation-empty">当前会话还没有可展示的内容</div></section>';
@@ -217,7 +236,7 @@ function conversation() {
     const question = node.input || node.title || '暂无提问内容';
     const answer = node.conclusion || node.detail || node.title || '暂无回答内容';
     const occurredAt = new Date(node.occurred_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' });
-    return `<article class="conversation-turn"><p class="conversation-time">${esc(occurredAt)}</p><div class="conversation-message question"><span class="conversation-avatar">你</span><button class="conversation-bubble" type="button" data-node="${node.id}"><span class="conversation-meta">提问</span>${esc(question)}</button></div><div class="conversation-message answer"><span class="conversation-avatar">${esc((node.app || 'AI').slice(0, 2).toUpperCase())}</span><button class="conversation-bubble" type="button" data-node="${node.id}"><span class="conversation-meta">${esc(node.app || 'Agent')}</span>${esc(answer)}</button></div></article>`;
+    return `<article class="conversation-turn"><p class="conversation-time">${esc(occurredAt)}</p><div class="conversation-message question"><span class="conversation-avatar">你</span><button class="conversation-bubble" type="button" aria-label="提问内容，双击展开或折叠"><span class="conversation-meta">提问</span><span class="conversation-content">${esc(question)}</span><span class="conversation-collapse-hint" aria-hidden="true">…⌄</span></button></div><div class="conversation-message answer"><span class="conversation-avatar">${esc((node.app || 'AI').slice(0, 2).toUpperCase())}</span><button class="conversation-bubble" type="button" aria-label="回答内容，双击展开或折叠"><span class="conversation-meta">${esc(node.app || 'Agent')}</span><span class="conversation-content">${esc(answer)}</span><span class="conversation-collapse-hint" aria-hidden="true">…⌄</span></button></div></article>`;
   }).join('');
   return `<section class="conversation" aria-label="按时间排序的问答对话"><div class="conversation-inner">${turns}</div></section>`;
 }

@@ -11,9 +11,17 @@
 .conversation-avatar { flex:0 0 34px; width:34px; height:34px; display:grid; place-items:center; border-radius:50%; background:#e9effb; color:var(--blue); font-size:12px; font-weight:700; }
 .conversation-message.answer { flex-direction:row-reverse; }
 .conversation-message.answer .conversation-avatar { background:var(--blue); color:#fff; }
-.conversation-bubble { max-width:min(620px, calc(100% - 44px)); border:1px solid var(--line); border-radius:4px 14px 14px; padding:11px 14px; background:var(--surface); color:var(--ink); line-height:1.65; text-align:left; white-space:pre-wrap; }
+.conversation-bubble { position:relative; max-width:min(620px, calc(100% - 44px)); border:1px solid var(--line); border-radius:4px 14px 14px; padding:11px 14px; background:var(--surface); color:var(--ink); line-height:1.65; text-align:left; white-space:pre-wrap; }
 .conversation-message.answer .conversation-bubble { border-color:var(--blue); border-radius:14px 4px 14px 14px; background:var(--blue); color:#fff; }
 .conversation-bubble:hover { box-shadow:0 0 0 3px #dce9ff; }
 .conversation-message.answer .conversation-bubble:hover { box-shadow:0 0 0 3px #bfd3ff; }
 .conversation-meta { display:block; margin-bottom:4px; font-size:11px; opacity:.72; }
+.conversation-content { display:block; max-height:19.8em; overflow:hidden; }
+.conversation-bubble.is-expanded .conversation-content { max-height:none; }
+.conversation-bubble.is-truncatable:not(.is-expanded)::after { content:""; position:absolute; right:0; bottom:0; width:82px; height:40px; pointer-events:none; background:linear-gradient(90deg, transparent, var(--surface) 52%); border-radius:0 0 14px; }
+.conversation-message.answer .conversation-bubble.is-truncatable:not(.is-expanded)::after { background:linear-gradient(90deg, transparent, var(--blue) 52%); }
+.conversation-collapse-hint { display:none; position:absolute; z-index:1; right:8px; bottom:4px; color:var(--muted); font-size:15px; line-height:1; opacity:.48; pointer-events:none; }
+.conversation-message.answer .conversation-collapse-hint { color:#fff; }
+.conversation-bubble.is-truncatable:not(.is-expanded) .conversation-collapse-hint { display:block; }
+.conversation-bubble.is-truncatable.is-expanded .conversation-collapse-hint { display:block; transform:rotate(180deg); }
 @media(max-width:850px) { .conversation { padding:22px 16px; } .conversation-bubble { max-width:calc(100% - 44px); } .view-switch button { padding-inline:8px; } }

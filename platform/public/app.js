@@ -175,6 +175,15 @@ function bind() {
     if (!node) return;
     copyText(b.dataset.copyNodeField === 'input' ? (node.input || '') : (node.conclusion || node.detail || ''));
   });
+  document.querySelectorAll('[data-copy-conversation]').forEach((button) => button.onclick = (event) => {
+    event.stopPropagation();
+    const node = state.nodes.find((item) => item.id === button.dataset.copyConversation);
+    if (!node) return;
+    copyText(button.dataset.conversationField === 'question'
+      ? (node.input || node.title || '')
+      : (node.conclusion || node.detail || node.title || ''));
+  });
+  document.querySelectorAll('[data-copy-conversation]').forEach((button) => button.ondblclick = (event) => event.stopPropagation());
   document.querySelectorAll('[data-unread]').forEach((b) => b.onclick = async () => { state.unreadOnly = b.dataset.unread === 'true'; await workspace(); });
   const sort = $('#sort'); if (sort) sort.onchange = async () => { state.sort = sort.value; await workspace(); };
   document.querySelectorAll('[data-close]').forEach((b) => b.onclick = () => { state.drawerOpen = false; workspace(); });
@@ -236,7 +245,8 @@ function conversation() {
     const question = node.input || node.title || '暂无提问内容';
     const answer = node.conclusion || node.detail || node.title || '暂无回答内容';
     const occurredAt = new Date(node.occurred_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' });
-    return `<article class="conversation-turn"><p class="conversation-time">${esc(occurredAt)}</p><div class="conversation-message question"><span class="conversation-avatar">你</span><button class="conversation-bubble" type="button" aria-label="提问内容，双击展开或折叠"><span class="conversation-meta">提问</span><span class="conversation-content">${esc(question)}</span><span class="conversation-collapse-hint" aria-hidden="true">…⌄</span></button></div><div class="conversation-message answer"><span class="conversation-avatar">${esc((node.app || 'AI').slice(0, 2).toUpperCase())}</span><button class="conversation-bubble" type="button" aria-label="回答内容，双击展开或折叠"><span class="conversation-meta">${esc(node.app || 'Agent')}</span><span class="conversation-content">${esc(answer)}</span><span class="conversation-collapse-hint" aria-hidden="true">…⌄</span></button></div></article>`;
+    const actions = (field) => `<span class="conversation-actions"><button class="conversation-action" type="button" data-copy-conversation="${node.id}" data-conversation-field="${field}" aria-label="复制${field === 'question' ? '提问' : '回答'}" title="复制">${copyIcon}</button></span>`;
+    return `<article class="conversation-turn"><p class="conversation-time">${esc(occurredAt)}</p><div class="conversation-message question"><span class="conversation-avatar">你</span><div class="conversation-bubble" role="button" tabindex="0" aria-label="提问内容，双击展开或折叠">${actions('question')}<span class="conversation-meta">提问</span><span class="conversation-content">${esc(question)}</span><span class="conversation-collapse-hint" aria-hidden="true">…⌄</span></div></div><div class="conversation-message answer"><span class="conversation-avatar">${esc((node.app || 'AI').slice(0, 2).toUpperCase())}</span><div class="conversation-bubble" role="button" tabindex="0" aria-label="回答内容，双击展开或折叠">${actions('answer')}<span class="conversation-meta">${esc(node.app || 'Agent')}</span><span class="conversation-content">${esc(answer)}</span><span class="conversation-collapse-hint" aria-hidden="true">…⌄</span></div></div></article>`;
   }).join('');
   return `<section class="conversation" aria-label="按时间排序的问答对话"><div class="conversation-inner">${turns}</div></section>`;
 }

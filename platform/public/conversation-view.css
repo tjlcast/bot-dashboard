@@ -18,6 +18,13 @@
 .conversation-meta { display:block; margin-bottom:4px; font-size:11px; opacity:.72; }
 .conversation-content { display:block; max-height:19.8em; overflow:hidden; }
 .conversation-bubble.is-expanded .conversation-content { max-height:none; }
+.conversation-actions { position:absolute; z-index:2; top:7px; right:8px; display:flex; gap:4px; opacity:0; transform:translateY(-2px); transition:opacity .16s, transform .16s; }
+.conversation-bubble:hover .conversation-actions, .conversation-bubble:focus-within .conversation-actions { opacity:1; transform:translateY(0); }
+.conversation-action { display:grid; place-items:center; width:25px; height:25px; padding:0; border:1px solid #d7dee9; border-radius:6px; color:var(--muted); background:color-mix(in srgb, var(--surface) 88%, transparent); box-shadow:0 2px 7px #25345114; }
+.conversation-action:hover { color:var(--blue); border-color:#b9cef8; background:var(--surface); }
+.conversation-action svg { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.8; }
+.conversation-message.answer .conversation-action { border-color:#ffffff66; color:#fff; background:#1e59c5b3; }
+.conversation-message.answer .conversation-action:hover { background:#174da9; border-color:#fff; }
 .conversation-bubble.is-truncatable:not(.is-expanded)::after { content:""; position:absolute; right:0; bottom:0; width:82px; height:40px; pointer-events:none; background:linear-gradient(90deg, transparent, var(--surface) 52%); border-radius:0 0 14px; }
 .conversation-message.answer .conversation-bubble.is-truncatable:not(.is-expanded)::after { background:linear-gradient(90deg, transparent, var(--blue) 52%); }
 .conversation-collapse-hint { display:none; position:absolute; z-index:1; right:8px; bottom:4px; color:var(--muted); font-size:15px; line-height:1; opacity:.48; pointer-events:none; }

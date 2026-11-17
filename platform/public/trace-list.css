@@ -15,3 +15,12 @@
 .trace-name-editor { display: flex; align-items: center; gap: 6px; }
 .trace-name-editor input { width: min(320px, 32vw); height: 31px; padding: 5px 8px; border: 1px solid var(--blue); border-radius: 7px; outline: 0; }
 .trace-name-editor .tiny.primary { border-color: var(--blue); background: var(--blue); color: #fff; }
+.trace.loading { cursor: wait; opacity: .78; }
+.trace.loading .trace-source { color: var(--blue) !important; }
+.trace-loading-spinner, .canvas-loading-spinner { display: inline-block; border: 2px solid #cfe0ff; border-top-color: var(--blue); border-radius: 50%; animation: trace-loading-spin .7s linear infinite; }
+.trace-loading-spinner { width: 12px; height: 12px; margin-right: 7px; vertical-align: -1px; }
+.canvas-loading { display: grid; place-items: center; overflow: hidden; }
+.canvas-loader { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.canvas-loader strong { color: var(--ink); font-size: 15px; }
+.canvas-loading-spinner { width: 32px; height: 32px; border-width: 3px; }
+@keyframes trace-loading-spin { to { transform: rotate(360deg); } }

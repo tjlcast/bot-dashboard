@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const app = $('#app');
 const notificationPreferenceKey = 'platform-system-notifications';
 const savedNotificationPreference = () => { try { return localStorage.getItem(notificationPreferenceKey) === 'enabled'; } catch { return false; } };
-const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null, focusLatestNode: false, viewMode: 'canvas' };
+const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null, focusLatestNode: false, viewMode: 'canvas', loadingTrace: null, traceLoadRequestId: 0 };
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
 const time = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); };
 const typeName = { report: '汇报', decision: '结论', checkpoint: '检查点', blocked: '待介入' };
@@ -36,7 +36,7 @@ const traceName = (trace) => trace.name || trace.title;
 const displayTraceName = (trace) => { const name = traceName(trace); const characters = Array.from(name); return characters.length > 20 ? `${characters.slice(0, 20).join('')}…` : name; };
 const nodeContext = (node) => (node.input || node.detail || node.title || '').trim();
 const displayNodeContext = (node) => { const context = nodeContext(node); const characters = Array.from(context); return characters.length > 12 ? `${characters.slice(0, 12).join('')}…` : context; };
-function traceList() { return state.traces.map((t) => `<div class="trace-item ${state.multiSelectMode ? 'multi-selecting' : ''}">${state.multiSelectMode ? `<label class="trace-select" title="选择汇报链"><input type="checkbox" data-select-trace="${t.id}" ${state.selectedTraceIds.has(t.id) ? 'checked' : ''} /><span class="sr-only">选择 ${esc(traceName(t))}</span></label>` : ''}<button class="trace ${t.id === state.selectedTrace ? 'selected' : ''} ${t.unread_count ? 'unread' : ''}" data-trace="${t.id}">${t.unread_count ? '<i class="trace-new-dot" aria-label="有新汇报"></i>' : ''}<div class="trace-row"><strong class="trace-name" title="${esc(traceName(t))}">${esc(displayTraceName(t))}</strong>${t.pending_count ? `<span class="pending">待介入 ${t.pending_count}</span>` : ''}</div><small class="trace-source">${esc(t.source_summary)} · ${time(t.last_activity_at)}</small><p class="trace-meta">${t.node_count} 个节点${t.pending_count ? ' · 等待处理' : ' · 正常推进'}</p></button><button class="trace-edit" type="button" data-edit-trace="${t.id}" aria-label="修改汇报链名字" title="修改名字">✎</button><button class="trace-delete" type="button" data-delete-trace="${t.id}" aria-label="删除汇报链" title="删除汇报链">×</button></div>`).join('') || '<div class="empty">没有符合条件的汇报链</div>'; }
+function traceList() { return state.traces.map((t) => { const loading = t.id === state.loadingTrace; return `<div class="trace-item ${state.multiSelectMode ? 'multi-selecting' : ''}">${state.multiSelectMode ? `<label class="trace-select" title="选择汇报链"><input type="checkbox" data-select-trace="${t.id}" ${state.selectedTraceIds.has(t.id) ? 'checked' : ''} /><span class="sr-only">选择 ${esc(traceName(t))}</span></label>` : ''}<button class="trace ${t.id === state.selectedTrace ? 'selected' : ''} ${t.unread_count ? 'unread' : ''} ${loading ? 'loading' : ''}" data-trace="${t.id}" ${loading ? 'aria-busy="true"' : ''}>${t.unread_count ? '<i class="trace-new-dot" aria-label="有新汇报"></i>' : ''}<div class="trace-row"><strong class="trace-name" title="${esc(traceName(t))}">${loading ? '<i class="trace-loading-spinner" aria-hidden="true"></i>' : ''}${esc(displayTraceName(t))}</strong>${t.pending_count ? `<span class="pending">待介入 ${t.pending_count}</span>` : ''}</div><small class="trace-source">${loading ? '正在加载…' : `${esc(t.source_summary)} · ${time(t.last_activity_at)}`}</small><p class="trace-meta">${t.node_count} 个节点${t.pending_count ? ' · 等待处理' : ' · 正常推进'}</p></button><button class="trace-edit" type="button" data-edit-trace="${t.id}" aria-label="修改汇报链名字" title="修改名字">✎</button><button class="trace-delete" type="button" data-delete-trace="${t.id}" aria-label="删除汇报链" title="删除汇报链">×</button></div>`; }).join('') || '<div class="empty">没有符合条件的汇报链</div>'; }
 function positions(nodes) {
   const byParent = new Map(); nodes.forEach((n) => { const key = n.parent_node_id || 'root'; byParent.set(key, [...(byParent.get(key) || []), n]); });
   const pos = new Map(); let row = 0;
@@ -44,6 +44,7 @@ function positions(nodes) {
   (byParent.get('root') || []).forEach((n) => walk(n, 0)); return pos;
 }
 function canvas() {
+  if (state.loadingTrace) return `<section class="canvas canvas-loading" aria-busy="true"><div class="canvas-loader"><i class="canvas-loading-spinner" aria-hidden="true"></i><strong>正在加载汇报链</strong><span>正在从云端获取最新节点…</span></div></section>`;
   const pos = positions(state.nodes); const edges = state.nodes.filter((n) => n.parent_node_id).map((n) => { const a = pos.get(n.parent_node_id), b = pos.get(n.id); return `<path class="${n.id === state.selectedNode ? 'active' : ''}" d="M ${a.x + 170} ${a.y + 48} C ${a.x + 190} ${a.y + 48}, ${b.x - 20} ${b.y + 48}, ${b.x} ${b.y + 48}" />`; }).join('');
   const newNodeIds = new Set(state.newNodeIdsByTrace[state.selectedTrace] || []);
   const cards = state.nodes.map((n) => { const p = pos.get(n.id); const status = n.status === 'blocked' ? 'blocked' : n.status === 'replied' ? 'replied' : ''; return `<button class="node ${status} ${newNodeIds.has(n.id) ? 'new-report' : ''} ${n.id === state.selectedNode ? 'selected' : ''}" data-node="${n.id}" style="left:${p.x}px;top:${p.y}px"><span class="node-type"><i class="dot ${status}"></i>${typeName[n.node_type] || n.node_type}</span><strong class="node-context" title="${esc(nodeContext(n))}">${esc(displayNodeContext(n))}</strong><span class="node-title" title="${esc(n.title)}">${esc(n.title)}</span><time>${new Date(n.occurred_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} · ${esc(n.app)}</time></button>`; }).join('');
@@ -87,6 +88,20 @@ async function workspace() {
   const nameInput = $('#trace-name-input'); if (nameInput) { nameInput.focus(); nameInput.select(); }
 }
 async function viewTrace(traceId) { const { newNodeIds } = await api(`/traces/${traceId}/view`, { method: 'POST' }); state.newNodeIdsByTrace[traceId] = newNodeIds; return newNodeIds; }
+function showTraceLoading(traceId) {
+  document.querySelectorAll('[data-trace]').forEach((button) => {
+    const loading = button.dataset.trace === traceId;
+    button.classList.toggle('loading', loading);
+    button.toggleAttribute('aria-busy', loading);
+    if (!loading) return;
+    const name = button.querySelector('.trace-name');
+    if (name && !name.querySelector('.trace-loading-spinner')) name.insertAdjacentHTML('afterbegin', '<i class="trace-loading-spinner" aria-hidden="true"></i>');
+    const source = button.querySelector('.trace-source');
+    if (source) source.textContent = '正在加载…';
+  });
+  const canvasElement = $('.canvas');
+  if (canvasElement) canvasElement.outerHTML = canvas();
+}
 async function updateTraceName(traceId, name) { const trimmed = name.trim(); if (!trimmed) return toast('汇报链名字不能为空'); try { await api(`/traces/${traceId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed }) }); state.editingTraceName = null; toast('汇报链名字已更新'); await workspace(); } catch (error) { toast(error.message); } }
 async function renameTrace(traceId) { const trace = state.traces.find((item) => item.id === traceId); const name = prompt('修改汇报链名字', traceName(trace)); if (name !== null) await updateTraceName(traceId, name); }
 async function deleteTraces(traceIds) { const traces = traceIds.map((id) => state.traces.find((trace) => trace.id === id)).filter(Boolean); if (!traces.length) return; const names = traces.map((trace) => `• ${traceName(trace)}`).join('\n'); const label = traces.length === 1 ? '此汇报链' : `这 ${traces.length} 条汇报链`; if (!confirm(`确认删除${label}吗？\n\n${names}\n\n将同时删除其中全部汇报节点、节点详情与人工介入记录。此操作无法撤销。`)) return; try { await api('/traces', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ traceIds }) }); traceIds.forEach((id) => { state.selectedTraceIds.delete(id); delete state.canvasViewByTrace[id]; delete state.newNodeIdsByTrace[id]; }); state.selectedNode = null; state.drawerOpen = false; toast(`已删除 ${traces.length} 条汇报链`); await workspace(); } catch (error) { toast(error.message); } }
@@ -115,7 +130,23 @@ function bindCanvasPan() {
 }
 function bind() {
   document.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => navigate(b.dataset.page));
-  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => { await viewTrace(b.dataset.trace); state.selectedTrace = b.dataset.trace; state.focusNodeId = null; state.focusLatestNode = true; state.selectedNode = null; state.drawerOpen = false; state.mobileTracesOpen = false; await workspace(); });
+  document.querySelectorAll('[data-trace]').forEach((b) => b.onclick = async () => {
+    const traceId = b.dataset.trace;
+    const requestId = ++state.traceLoadRequestId;
+    state.loadingTrace = traceId;
+    showTraceLoading(traceId);
+    try {
+      await viewTrace(traceId);
+      if (requestId !== state.traceLoadRequestId) return;
+      state.selectedTrace = traceId; state.focusNodeId = null; state.focusLatestNode = true; state.selectedNode = null; state.drawerOpen = false; state.mobileTracesOpen = false;
+    } catch (error) {
+      if (requestId === state.traceLoadRequestId) toast(error.message);
+    } finally {
+      if (requestId !== state.traceLoadRequestId) return;
+      state.loadingTrace = null;
+      await workspace();
+    }
+  });
   const openMobileTraces = $('[data-mobile-traces]'); if (openMobileTraces) openMobileTraces.onclick = () => { state.mobileTracesOpen = true; workspace(); };
   document.querySelectorAll('[data-close-mobile-traces]').forEach((b) => b.onclick = () => { state.mobileTracesOpen = false; workspace(); });
   const currentTraceEditor = $('[data-edit-current-trace]'); if (currentTraceEditor) currentTraceEditor.onclick = () => { state.editingTraceName = state.selectedTrace; workspace(); };

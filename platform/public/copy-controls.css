@@ -1,0 +1,6 @@
+.section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.section-heading h3{margin-bottom:8px}
+.copy-icon{display:grid;place-items:center;flex:0 0 auto;width:28px;height:28px;margin-top:-7px;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+.copy-icon:hover{background:#f3f5f8;color:var(--ink)}
+.copy-icon:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.copy-icon svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}

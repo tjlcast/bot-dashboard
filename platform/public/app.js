@@ -8,6 +8,27 @@ const time = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new
 const typeName = { report: '汇报', decision: '结论', checkpoint: '检查点', blocked: '待介入' };
 async function api(path, options) { const r = await fetch(`/v1${path}`, options); const d = await r.json(); if (!r.ok) throw new Error(d.error?.message || '请求失败'); return d; }
 function toast(message) { const t = $('#toast'); t.textContent = message; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2600); }
+async function copyText(value) {
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+    else {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('COPY_FAILED');
+    }
+    toast('已复制');
+  } catch {
+    toast('复制失败，请手动复制');
+  }
+}
+const copyIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="1.5"></rect><path d="M15 9V6.5A1.5 1.5 0 0 0 13.5 5h-8A1.5 1.5 0 0 0 4 6.5v8A1.5 1.5 0 0 0 5.5 16H9"></path></svg>';
 function nav(active) { return `<nav class="side"><div class="brand">A</div><button class="nav ${active === 'workspace' ? 'active' : ''}" data-page="workspace" title="工作台">⌘</button><button class="nav ${active === 'inbox' ? 'active' : ''}" data-page="inbox" title="收件箱">▣</button><button class="nav ${active === 'devices' ? 'active' : ''}" data-page="devices" title="接入">⌁</button><button class="nav bottom ${state.settingsOpen ? 'active' : ''}" data-settings title="设置">⚙</button></nav>`; }
 async function loadTraces() { state.traces = (await api(`/traces?sort=${state.sort}&unreadOnly=${state.unreadOnly}`)).traces; state.selectedTraceIds = new Set([...state.selectedTraceIds].filter((id) => state.traces.some((trace) => trace.id === id))); if (!state.selectedTrace || !state.traces.some((x) => x.id === state.selectedTrace)) state.selectedTrace = state.traces[0]?.id; }
 async function loadNodes() { if (!state.selectedTrace) return; state.nodes = (await api(`/traces/${state.selectedTrace}/nodes`)).nodes; if (state.selectedNode && !state.nodes.some((node) => node.id === state.selectedNode)) state.selectedNode = null; }
@@ -28,7 +49,7 @@ function canvas() {
   const cards = state.nodes.map((n) => { const p = pos.get(n.id); const status = n.status === 'blocked' ? 'blocked' : n.status === 'replied' ? 'replied' : ''; return `<button class="node ${status} ${newNodeIds.has(n.id) ? 'new-report' : ''} ${n.id === state.selectedNode ? 'selected' : ''}" data-node="${n.id}" style="left:${p.x}px;top:${p.y}px"><span class="node-type"><i class="dot ${status}"></i>${typeName[n.node_type] || n.node_type}</span><strong class="node-context" title="${esc(nodeContext(n))}">${esc(displayNodeContext(n))}</strong><span class="node-title" title="${esc(n.title)}">${esc(n.title)}</span><time>${new Date(n.occurred_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} · ${esc(n.app)}</time></button>`; }).join('');
   return `<section class="canvas"><div class="canvas-inner"><svg class="edges" width="100%" height="100%">${edges}</svg>${cards}<div class="legend"><span><i class="dot"></i> 已完成</span><span><i class="dot blocked"></i> 待介入</span><span>点击节点查看详情</span></div></div></section>`;
 }
-function drawer() { const n = state.nodes.find((x) => x.id === state.selectedNode); if (!n) return '<aside class="drawer"></aside>'; const source = n.source_url ? `<a href="${esc(n.source_url)}">打开原始会话 ↗</a>` : '<span>此来源暂不支持跳转</span>'; return `<aside class="drawer ${state.drawerOpen ? 'open' : ''}" id="drawer"><div class="drawer-head"><div><div class="node-type"><i class="dot ${n.status === 'blocked' ? 'blocked' : n.status === 'replied' ? 'replied' : ''}"></i>${typeName[n.node_type]}</div><h2>${esc(n.title)}</h2></div><button class="close" data-close>×</button></div><div class="status">${n.status === 'blocked' ? '等待你的介入' : n.status === 'replied' ? '已回复，等待 Agent' : '已完成'}</div><div class="section"><h3>AI 结论</h3><p>${esc(n.conclusion || n.detail || '暂无结论')}</p></div><div class="section"><h3>输入 / 上下文</h3><p>${esc(n.input || '暂无输入内容')}</p></div><div class="section"><h3>来源</h3><dl class="meta"><dt>设备</dt><dd>${esc(n.device_id)}</dd><dt>应用</dt><dd>${esc(n.app)}</dd><dt>会话</dt><dd>${esc(n.session_id)}</dd><dt>时间</dt><dd>${new Date(n.occurred_at).toLocaleString('zh-CN')}</dd><dt>原始会话</dt><dd>${source}</dd></dl></div>${n.status === 'blocked' ? `<div class="section"><h3>介入并发送</h3><textarea class="reply" id="reply" placeholder="输入给 Agent 的回复…"></textarea><div class="reply-actions"><button class="btn" data-close>取消</button><button class="btn primary" data-send="${n.id}">发送</button></div></div>` : ''}<div class="section danger-zone"><h3>危险操作</h3><p>删除此汇报链会同时删除全部汇报节点与人工介入记录。</p><button class="btn danger" data-delete-trace="${n.trace_id}">删除此汇报链</button></div></aside>`; }
+function drawer() { const n = state.nodes.find((x) => x.id === state.selectedNode); if (!n) return '<aside class="drawer"></aside>'; const source = n.source_url ? `<a href="${esc(n.source_url)}">打开原始会话 ↗</a>` : '<span>此来源暂不支持跳转</span>'; const content = n.conclusion || n.detail || ''; const input = n.input || ''; const copyButton = (field, label) => `<button class="copy-icon" type="button" data-copy-node-field="${field}" aria-label="复制${label}" title="复制${label}">${copyIcon}</button>`; return `<aside class="drawer ${state.drawerOpen ? 'open' : ''}" id="drawer"><div class="drawer-head"><div><div class="node-type"><i class="dot ${n.status === 'blocked' ? 'blocked' : n.status === 'replied' ? 'replied' : ''}"></i>${typeName[n.node_type]}</div><h2>${esc(n.title)}</h2></div><button class="close" data-close>×</button></div><div class="status">${n.status === 'blocked' ? '等待你的介入' : n.status === 'replied' ? '已回复，等待 Agent' : '已完成'}</div><div class="section"><div class="section-heading"><h3>内容</h3>${copyButton('content', '内容')}</div><p>${esc(content || '暂无结论')}</p></div><div class="section"><div class="section-heading"><h3>输入 / 上下文</h3>${copyButton('input', '输入/上下文')}</div><p>${esc(input || '暂无输入内容')}</p></div><div class="section"><h3>来源</h3><dl class="meta"><dt>设备</dt><dd>${esc(n.device_id)}</dd><dt>应用</dt><dd>${esc(n.app)}</dd><dt>会话</dt><dd>${esc(n.session_id)}</dd><dt>时间</dt><dd>${new Date(n.occurred_at).toLocaleString('zh-CN')}</dd><dt>原始会话</dt><dd>${source}</dd></dl></div>${n.status === 'blocked' ? `<div class="section"><h3>介入并发送</h3><textarea class="reply" id="reply" placeholder="输入给 Agent 的回复…"></textarea><div class="reply-actions"><button class="btn" data-close>取消</button><button class="btn primary" data-send="${n.id}">发送</button></div></div>` : ''}<div class="section danger-zone"><h3>危险操作</h3><p>删除此汇报链会同时删除全部汇报节点与人工介入记录。</p><button class="btn danger" data-delete-trace="${n.trace_id}">删除此汇报链</button></div></aside>`; }
 function settingsMenu() { if (!state.settingsOpen) return ''; const supported = 'Notification' in window; return `<section class="settings-menu" aria-label="设置"><h2>设置</h2><fieldset ${supported ? '' : 'disabled'}><legend>系统提示</legend><label><input type="radio" name="system-notifications" value="enabled" ${state.systemNotifications ? 'checked' : ''} /> 开启系统提示</label><label><input type="radio" name="system-notifications" value="disabled" ${state.systemNotifications ? '' : 'checked'} /> 关闭系统提示</label></fieldset>${supported ? '<p>开启后，浏览器会在收到新汇报时发出系统通知。</p>' : '<p>当前浏览器不支持系统提示。</p>'}</section>`; }
 async function workspace() {
   await loadTraces(); await loadNodes();
@@ -101,6 +122,11 @@ function bind() {
   document.querySelectorAll('[data-delete-trace]').forEach((b) => b.onclick = () => deleteTraces([b.dataset.deleteTrace]));
   const deleteSelected = $('[data-delete-selected]'); if (deleteSelected) deleteSelected.onclick = () => deleteTraces([...state.selectedTraceIds]);
   document.querySelectorAll('[data-node]').forEach((b) => b.onclick = async () => { state.selectedNode = b.dataset.node; state.drawerOpen = true; await workspace(); });
+  document.querySelectorAll('[data-copy-node-field]').forEach((b) => b.onclick = () => {
+    const node = state.nodes.find((item) => item.id === state.selectedNode);
+    if (!node) return;
+    copyText(b.dataset.copyNodeField === 'input' ? (node.input || '') : (node.conclusion || node.detail || ''));
+  });
   document.querySelectorAll('[data-unread]').forEach((b) => b.onclick = async () => { state.unreadOnly = b.dataset.unread === 'true'; await workspace(); });
   const sort = $('#sort'); if (sort) sort.onchange = async () => { state.sort = sort.value; await workspace(); };
   document.querySelectorAll('[data-close]').forEach((b) => b.onclick = () => { state.drawerOpen = false; workspace(); });

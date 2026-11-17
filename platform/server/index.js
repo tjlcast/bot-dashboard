@@ -91,7 +91,7 @@ function seed() {
 if (process.env.SEED_DEMO === 'true') seed();
 
 const app = Fastify({ logger: true });
-app.register(fastifyStatic, { root: join(root, 'public'), wildcard: false, index: false });
+app.register(fastifyStatic, { root: join(root, 'public'), index: false });
 app.get('/', (_, reply) => reply.sendFile('index.html'));
 app.addHook('onClose', () => db.close());
 

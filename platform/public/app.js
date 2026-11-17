@@ -2,7 +2,7 @@ const $ = (s) => document.querySelector(s);
 const app = $('#app');
 const notificationPreferenceKey = 'platform-system-notifications';
 const savedNotificationPreference = () => { try { return localStorage.getItem(notificationPreferenceKey) === 'enabled'; } catch { return false; } };
-const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null, focusLatestNode: false };
+const state = { page: 'workspace', traces: [], selectedTrace: null, nodes: [], selectedNode: null, drawerOpen: false, mobileTracesOpen: false, unreadOnly: false, sort: 'recent_activity', newNodeIdsByTrace: {}, canvasViewByTrace: {}, selectedTraceIds: new Set(), multiSelectMode: false, editingTraceName: null, settingsOpen: false, systemNotifications: savedNotificationPreference(), focusNodeId: null, focusLatestNode: false, viewMode: 'canvas' };
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]);
 const time = (iso) => { const minutes = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000)); return minutes < 1 ? '刚刚' : minutes < 60 ? `${minutes} 分钟前` : new Date(iso).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); };
 const typeName = { report: '汇报', decision: '结论', checkpoint: '检查点', blocked: '待介入' };
@@ -65,6 +65,12 @@ async function workspace() {
   const filters = `<div class="filters"><button class="filter ${!state.unreadOnly ? 'active' : ''}" data-unread="false">全部</button><button class="filter ${state.unreadOnly ? 'active' : ''}" data-unread="true">有新汇报</button></div>`;
   app.innerHTML = `<div class="shell">${nav('workspace')}<main class="main"><header class="top"><div class="top-title"><div class="title" title="${esc(trace ? traceName(trace) : '工作台')}">${traceHeading}</div><div class="eyebrow">${esc(trace?.source_summary || '选择一条汇报链')} · ${trace?.node_count || 0} 个节点</div></div><div class="toolbar"><button class="tiny mobile-traces-trigger" data-mobile-traces>汇报链</button><button class="tiny" data-fit>适应画板</button><button class="tiny" data-refresh>刷新</button></div></header>${canvas()}</main><div class="mobile-traces-backdrop ${state.mobileTracesOpen ? 'open' : ''}" data-close-mobile-traces></div><aside class="traces ${state.mobileTracesOpen ? 'open' : ''}" aria-label="汇报链"><div class="trace-head"><div class="trace-list-title"><h2>汇报链</h2><div class="trace-list-actions"><button class="tiny mobile-traces-close" data-close-mobile-traces aria-label="关闭汇报链">×</button><button class="tiny" data-toggle-multi-select>${state.multiSelectMode ? '取消多选' : '多选'}</button>${state.multiSelectMode ? `<button class="tiny" data-select-all>全部选择</button><button class="tiny danger" data-delete-selected ${selectedCount ? '' : 'disabled'}>删除${selectedCount ? `（${selectedCount}）` : ''}</button>` : ''}</div></div>${filters}<select class="sort" id="sort"><option value="recent_activity">最近活跃</option><option value="pending_first">待介入优先</option><option value="recent_created">最近创建</option></select></div><div class="trace-list">${traceList()}</div><div class="live"><i class="online"></i>实时同步正常</div></aside></div>${drawer()}${settingsMenu()}`;
   $('#sort').value = state.sort;
+  renderViewMode();
+  if (state.viewMode === 'conversation') {
+    bind();
+    const nameInput = $('#trace-name-input'); if (nameInput) { nameInput.focus(); nameInput.select(); }
+    return;
+  }
   const canvasElement = $('.canvas');
   const focusNode = state.nodes.find((node) => node.id === state.focusNodeId);
   const position = focusNode ? positions(state.nodes).get(focusNode.id) : null;
@@ -155,3 +161,47 @@ document.addEventListener('click', (event) => { const settings = event.target.cl
 document.addEventListener('change', (event) => { if (event.target.matches('input[name="system-notifications"]')) setSystemNotifications(event.target.value === 'enabled'); });
 document.addEventListener('keydown', (event) => { if (event.key !== 'Escape' || state.page !== 'workspace') return; if (state.mobileTracesOpen) { state.mobileTracesOpen = false; workspace(); return; } if (state.editingTraceName) { state.editingTraceName = null; workspace(); return; } if (state.drawerOpen && state.selectedNode) { state.drawerOpen = false; workspace(); } });
 navigate('workspace');
+
+function conversationNodes() {
+  return state.nodes.map((node, index) => ({ node, index })).sort((a, b) => {
+    const difference = new Date(a.node.occurred_at).getTime() - new Date(b.node.occurred_at).getTime();
+    return Number.isNaN(difference) || difference === 0 ? a.index - b.index : difference;
+  }).map(({ node }) => node);
+}
+
+function conversation() {
+  const nodes = conversationNodes();
+  if (!nodes.length) return '<section class="conversation"><div class="conversation-empty">当前会话还没有可展示的内容</div></section>';
+  const turns = nodes.map((node) => {
+    const question = node.input || node.title || '暂无提问内容';
+    const answer = node.conclusion || node.detail || node.title || '暂无回答内容';
+    const occurredAt = new Date(node.occurred_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' });
+    return `<article class="conversation-turn"><p class="conversation-time">${esc(occurredAt)}</p><div class="conversation-message question"><span class="conversation-avatar">你</span><button class="conversation-bubble" type="button" data-node="${node.id}"><span class="conversation-meta">提问</span>${esc(question)}</button></div><div class="conversation-message answer"><span class="conversation-avatar">${esc((node.app || 'AI').slice(0, 2).toUpperCase())}</span><button class="conversation-bubble" type="button" data-node="${node.id}"><span class="conversation-meta">${esc(node.app || 'Agent')}</span>${esc(answer)}</button></div></article>`;
+  }).join('');
+  return `<section class="conversation" aria-label="按时间排序的问答对话"><div class="conversation-inner">${turns}</div></section>`;
+}
+
+function renderViewMode() {
+  const toolbar = $('.toolbar');
+  const canvas = $('.canvas');
+  if (!toolbar || !canvas) return;
+  const switcher = document.createElement('div');
+  switcher.className = 'view-switch';
+  switcher.setAttribute('role', 'group');
+  switcher.setAttribute('aria-label', '展现方式');
+  switcher.innerHTML = `<button type="button" class="${state.viewMode === 'canvas' ? 'active' : ''}" data-view-mode="canvas">画板</button><button type="button" class="${state.viewMode === 'conversation' ? 'active' : ''}" data-view-mode="conversation">对话</button>`;
+  toolbar.prepend(switcher);
+  if (state.viewMode === 'conversation') {
+    canvas.replaceWith(document.createRange().createContextualFragment(conversation()));
+    $('[data-fit]')?.remove();
+  }
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-view-mode]');
+  if (!button || state.page !== 'workspace') return;
+  state.viewMode = button.dataset.viewMode;
+  state.selectedNode = null;
+  state.drawerOpen = false;
+  workspace();
+});

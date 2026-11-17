@@ -1,7 +1,7 @@
 {
   "scripts": {
     "deploy": {
-      "command": "git branch -D deploy 2>nul & git checkout -b deploy && git push -u origin deploy && git checkout master && git branch -D deploy"
+      "command": "git checkout -B deploy && git push -u origin deploy && git checkout master && git branch -D deploy"
     }
   },
   "metadataGeneration": {

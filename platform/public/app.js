@@ -59,12 +59,16 @@ async function workspace() {
     state.focusLatestNode = false;
   }
   const trace = state.traces.find((t) => t.id === state.selectedTrace);
+  const loadingTrace = state.traces.find((t) => t.id === state.loadingTrace);
+  const displayedTrace = loadingTrace || trace;
   const selectedCount = state.selectedTraceIds.size;
-  const traceHeading = trace && state.editingTraceName === trace.id
+  const traceHeading = loadingTrace
+    ? `<span class="trace-heading trace-heading-loading" aria-busy="true"><i class="trace-loading-spinner" aria-hidden="true"></i>${esc(displayTraceName(loadingTrace))}</span>`
+    : trace && state.editingTraceName === trace.id
     ? `<form class="trace-name-editor" data-trace-name-editor="${trace.id}"><input id="trace-name-input" value="${esc(traceName(trace))}" aria-label="汇报链名字" maxlength="500" /><button class="tiny primary" type="submit">保存</button><button class="tiny" type="button" data-cancel-trace-name>取消</button></form>`
     : `<button class="trace-heading" type="button" data-edit-current-trace title="点击修改汇报链名字">${esc(trace ? displayTraceName(trace) : '工作台')}</button>`;
   const filters = `<div class="filters"><button class="filter ${!state.unreadOnly ? 'active' : ''}" data-unread="false">全部</button><button class="filter ${state.unreadOnly ? 'active' : ''}" data-unread="true">有新汇报</button></div>`;
-  app.innerHTML = `<div class="shell">${nav('workspace')}<main class="main"><header class="top"><div class="top-title"><div class="title" title="${esc(trace ? traceName(trace) : '工作台')}">${traceHeading}</div><div class="eyebrow">${esc(trace?.source_summary || '选择一条汇报链')} · ${trace?.node_count || 0} 个节点</div></div><div class="toolbar"><button class="tiny mobile-traces-trigger" data-mobile-traces>汇报链</button><button class="tiny" data-fit>适应画板</button><button class="tiny" data-refresh>刷新</button></div></header>${canvas()}</main><div class="mobile-traces-backdrop ${state.mobileTracesOpen ? 'open' : ''}" data-close-mobile-traces></div><aside class="traces ${state.mobileTracesOpen ? 'open' : ''}" aria-label="汇报链"><div class="trace-head"><div class="trace-list-title"><h2>汇报链</h2><div class="trace-list-actions"><button class="tiny mobile-traces-close" data-close-mobile-traces aria-label="关闭汇报链">×</button><button class="tiny" data-toggle-multi-select>${state.multiSelectMode ? '取消多选' : '多选'}</button>${state.multiSelectMode ? `<button class="tiny" data-select-all>全部选择</button><button class="tiny danger" data-delete-selected ${selectedCount ? '' : 'disabled'}>删除${selectedCount ? `（${selectedCount}）` : ''}</button>` : ''}</div></div>${filters}<select class="sort" id="sort"><option value="recent_activity">最近活跃</option><option value="pending_first">待介入优先</option><option value="recent_created">最近创建</option></select></div><div class="trace-list">${traceList()}</div><div class="live"><i class="online"></i>实时同步正常</div></aside></div>${drawer()}${settingsMenu()}`;
+  app.innerHTML = `<div class="shell">${nav('workspace')}<main class="main"><header class="top"><div class="top-title"><div class="title" title="${esc(displayedTrace ? traceName(displayedTrace) : '工作台')}">${traceHeading}</div><div class="eyebrow">${esc(displayedTrace?.source_summary || '选择一条汇报链')} · ${displayedTrace?.node_count || 0} 个节点</div></div><div class="toolbar"><button class="tiny mobile-traces-trigger" data-mobile-traces>汇报链</button><button class="tiny" data-fit>适应画板</button><button class="tiny" data-refresh>刷新</button></div></header>${canvas()}</main><div class="mobile-traces-backdrop ${state.mobileTracesOpen ? 'open' : ''}" data-close-mobile-traces></div><aside class="traces ${state.mobileTracesOpen ? 'open' : ''}" aria-label="汇报链"><div class="trace-head"><div class="trace-list-title"><h2>汇报链</h2><div class="trace-list-actions"><button class="tiny mobile-traces-close" data-close-mobile-traces aria-label="关闭汇报链">×</button><button class="tiny" data-toggle-multi-select>${state.multiSelectMode ? '取消多选' : '多选'}</button>${state.multiSelectMode ? `<button class="tiny" data-select-all>全部选择</button><button class="tiny danger" data-delete-selected ${selectedCount ? '' : 'disabled'}>删除${selectedCount ? `（${selectedCount}）` : ''}</button>` : ''}</div></div>${filters}<select class="sort" id="sort"><option value="recent_activity">最近活跃</option><option value="pending_first">待介入优先</option><option value="recent_created">最近创建</option></select></div><div class="trace-list">${traceList()}</div><div class="live"><i class="online"></i>实时同步正常</div></aside></div>${drawer()}${settingsMenu()}`;
   $('#sort').value = state.sort;
   renderViewMode();
   if (state.viewMode === 'conversation') {
@@ -89,6 +93,12 @@ async function workspace() {
 }
 async function viewTrace(traceId) { const { newNodeIds } = await api(`/traces/${traceId}/view`, { method: 'POST' }); state.newNodeIdsByTrace[traceId] = newNodeIds; return newNodeIds; }
 function showTraceLoading(traceId) {
+  const trace = state.traces.find((item) => item.id === traceId);
+  const heading = $('.top .title');
+  if (trace && heading) {
+    heading.title = traceName(trace);
+    heading.innerHTML = `<span class="trace-heading trace-heading-loading" aria-busy="true"><i class="trace-loading-spinner" aria-hidden="true"></i>${esc(displayTraceName(trace))}</span>`;
+  }
   document.querySelectorAll('[data-trace]').forEach((button) => {
     const loading = button.dataset.trace === traceId;
     button.classList.toggle('loading', loading);

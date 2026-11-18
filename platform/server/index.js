@@ -117,11 +117,10 @@ function saveSceneConfig(input) {
   db.prepare("INSERT INTO settings(key,value) VALUES('scene_config',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(config));
   return config;
 }
-function sinkMessages(node, device) {
-  const common = { occurred_at: node.occurred_at, session_id: node.session_id, app: node.app, device };
+function sinkMessages(node) {
   return [
-    { message_id: `m-${node.id}-user`, role: 'user', content: JSON.stringify({ ...common, user_input: node.input || '' }) },
-    { message_id: `m-${node.id}-assistant`, role: 'assistant', content: JSON.stringify({ ...common, assistant_output: node.conclusion || node.detail || node.title || '' }) },
+    { message_id: `m-${node.id}-user`, role: 'user', content: node.input || '' },
+    { message_id: `m-${node.id}-assistant`, role: 'assistant', content: node.conclusion || node.detail || '' },
   ];
 }
 function recordSinkLog(nodeId, endpoint, status, httpStatus, error) {
@@ -141,14 +140,14 @@ function getSinkStats(windowMinutes = 60) {
     lastHttpStatus: last?.http_status ?? null,
   };
 }
-async function pushToSink(config, node, device) {
+async function pushToSink(config, node) {
   if (!config.sinkEnabled || !config.url) return;
   const endpoint = `${config.url.replace(/\/+$/, '')}/v1/messages/add`;
   const payload = {
     user_id: config.username,
     session_id: node.session_id,
     message_type: 'internal',
-    messages: sinkMessages(node, device),
+    messages: sinkMessages(node),
   };
   try {
     const response = await fetch(endpoint, {
@@ -291,7 +290,7 @@ app.post('/v1/reports', (request, reply) => {
   const config = getSceneConfig();
   if (config.sinkEnabled && config.url) {
     const node = db.prepare('SELECT * FROM nodes WHERE id=?').get(nodeId);
-    if (node) pushToSink(config, node, device.name).catch(() => {});
+    if (node) pushToSink(config, node).catch(() => {});
   }
   return reply.code(201).send(response);
 });

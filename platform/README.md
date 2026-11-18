@@ -33,5 +33,9 @@ npm run dev
 - `GET /v1/traces`、`GET /v1/traces/:id/nodes`、`GET /v1/nodes/:id`
 - `GET /v1/inbox?status=pending`、`POST /v1/nodes/:id/interventions`
 - `GET /v1/devices`、`POST /v1/devices/pair`、`GET /v1/events`（SSE）
+- `GET /v1/settings/scene`、`PUT /v1/settings/scene`：场景配置（HBrain url、apiKey、用户名字、信息 Sink 开关）
+- `GET /v1/settings/sink-stats?windowMinutes=60`：最近一次发送时间与窗口内成功/失败数量
+
+设置菜单左下角可编辑场景配置。开启信息 Sink 后，每收到一条新汇报，服务端会向 `{url}/v1/messages/add` 发送 POST 请求；`user_id` 取用户名字，`session_id` 取汇报会话，消息内容包含汇报时间、会话、应用、设备及输入/输出。Sink 板块展示最近一次发送时间，并可在 1 小时 / 24 小时 / 7 天窗口间切换查看成功与失败数；发送日志仅保留 7 天。
 
 演示设备 token：`dev_mac_token`。

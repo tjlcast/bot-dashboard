@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, trace_id TEXT NOT NULL RE
 CREATE TABLE IF NOT EXISTS interventions (id TEXT PRIMARY KEY, node_id TEXT NOT NULL REFERENCES nodes(id), body TEXT NOT NULL, status TEXT NOT NULL, sent_at TEXT NOT NULL, replied_at TEXT);
 CREATE TABLE IF NOT EXISTS idempotency_keys (token_hash TEXT NOT NULL, key TEXT NOT NULL, response_json TEXT NOT NULL, expires_at TEXT NOT NULL, PRIMARY KEY(token_hash, key));
 CREATE TABLE IF NOT EXISTS event_log (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sink_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT, endpoint TEXT NOT NULL, status TEXT NOT NULL, http_status INTEGER, error TEXT, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_sink_logs_created ON sink_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trace_activity ON traces(last_activity_at DESC);
 CREATE INDEX IF NOT EXISTS idx_node_trace ON nodes(trace_id, occurred_at ASC);
 CREATE INDEX IF NOT EXISTS idx_node_parent ON nodes(parent_node_id);
@@ -89,11 +92,81 @@ function seed() {
 }
 // 演示数据仅在显式开启时写入，正式环境默认保持空库。
 if (process.env.SEED_DEMO === 'true') seed();
+// 仅保留最大统计窗口内的发送日志，避免无限增长。
+db.prepare('DELETE FROM sink_logs WHERE created_at < ?').run(new Date(Date.now() - 10080 * 60000).toISOString());
 
 const app = Fastify({ logger: true });
 app.register(fastifyStatic, { root: join(root, 'public'), index: false });
 app.get('/', (_, reply) => reply.sendFile('index.html'));
 app.addHook('onClose', () => db.close());
+
+// 场景配置：控制新汇报是否同步到外部 sink 服务。
+const DEFAULT_SCENE_CONFIG = { url: '', apiKey: '', username: '', sinkEnabled: false };
+function getSceneConfig() {
+  const row = db.prepare("SELECT value FROM settings WHERE key='scene_config'").get();
+  if (!row) return { ...DEFAULT_SCENE_CONFIG };
+  try { return { ...DEFAULT_SCENE_CONFIG, ...JSON.parse(row.value) }; } catch { return { ...DEFAULT_SCENE_CONFIG }; }
+}
+function saveSceneConfig(input) {
+  const config = {
+    url: typeof input?.url === 'string' ? input.url.trim() : '',
+    apiKey: typeof input?.apiKey === 'string' ? input.apiKey : '',
+    username: typeof input?.username === 'string' ? input.username.trim() : '',
+    sinkEnabled: input?.sinkEnabled === true,
+  };
+  db.prepare("INSERT INTO settings(key,value) VALUES('scene_config',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(config));
+  return config;
+}
+function sinkMessages(node, device) {
+  const common = { occurred_at: node.occurred_at, session_id: node.session_id, app: node.app, device };
+  return [
+    { message_id: `m-${node.id}-user`, role: 'user', content: JSON.stringify({ ...common, user_input: node.input || '' }) },
+    { message_id: `m-${node.id}-assistant`, role: 'assistant', content: JSON.stringify({ ...common, assistant_output: node.conclusion || node.detail || node.title || '' }) },
+  ];
+}
+function recordSinkLog(nodeId, endpoint, status, httpStatus, error) {
+  db.prepare('INSERT INTO sink_logs(node_id,endpoint,status,http_status,error,created_at) VALUES(?,?,?,?,?,?)').run(nodeId, endpoint, status, httpStatus ?? null, error ?? null, now());
+}
+function getSinkStats(windowMinutes = 60) {
+  const minutes = Number.isFinite(Number(windowMinutes)) && Number(windowMinutes) > 0 ? Math.min(Math.round(Number(windowMinutes)), 10080) : 60;
+  const since = new Date(Date.now() - minutes * 60000).toISOString();
+  const rows = db.prepare('SELECT status, COUNT(*) AS count FROM sink_logs WHERE created_at >= ? GROUP BY status').all(since);
+  const last = db.prepare('SELECT created_at, status, http_status FROM sink_logs ORDER BY created_at DESC LIMIT 1').get();
+  return {
+    windowMinutes: minutes,
+    success: rows.find((row) => row.status === 'success')?.count || 0,
+    failure: rows.find((row) => row.status === 'failure')?.count || 0,
+    lastSentAt: last?.created_at || null,
+    lastStatus: last?.status || null,
+    lastHttpStatus: last?.http_status ?? null,
+  };
+}
+async function pushToSink(config, node, device) {
+  if (!config.sinkEnabled || !config.url) return;
+  const endpoint = `${config.url.replace(/\/+$/, '')}/v1/messages/add`;
+  const payload = {
+    user_id: config.username,
+    session_id: node.session_id,
+    message_type: 'internal',
+    messages: sinkMessages(node, device),
+  };
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}`, 'X-API-Key': config.apiKey },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    recordSinkLog(node.id, endpoint, response.ok ? 'success' : 'failure', response.status, response.ok ? null : `HTTP ${response.status}`);
+    if (!response.ok) app.log.error({ status: response.status, endpoint }, 'sink 推送失败');
+    else app.log.info({ status: response.status, endpoint }, 'sink 推送成功');
+  } catch (error) {
+    recordSinkLog(node.id, endpoint, 'failure', null, error.message);
+    app.log.error({ err: error, endpoint }, 'sink 推送异常');
+  } finally {
+    emit('sink.updated', { nodeId: node.id });
+  }
+}
 
 function requireDevice(request, reply) {
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -168,6 +241,12 @@ app.post('/v1/devices/pair', (request, reply) => {
   emit('device.updated', { deviceId: id, state: 'online', lastSeenAt: time });
   return reply.code(201).send({ deviceId: id, token, createdAt: time });
 });
+app.get('/v1/settings/scene', () => ({ config: getSceneConfig() }));
+app.put('/v1/settings/scene', (request) => ({ config: saveSceneConfig(request.body) }));
+app.get('/v1/settings/sink-stats', (request) => {
+  const minutes = Number(request.query.windowMinutes);
+  return { stats: getSinkStats(Number.isFinite(minutes) ? minutes : 60) };
+});
 app.post('/v1/reports', (request, reply) => {
   const device = requireDevice(request, reply); if (!device || device.raw) return;
   const input = request.body || {};
@@ -209,6 +288,11 @@ app.post('/v1/reports', (request, reply) => {
   const response = { traceId, nodeId, createdAt: now(), status: input.nodeType === 'blocked' ? 'blocked' : 'completed' };
   db.prepare('INSERT INTO idempotency_keys VALUES(?,?,?,?)').run(device.token_hash, key, JSON.stringify(response), new Date(Date.now() + 86400000).toISOString());
   emit('node.created', { traceId, nodeId });
+  const config = getSceneConfig();
+  if (config.sinkEnabled && config.url) {
+    const node = db.prepare('SELECT * FROM nodes WHERE id=?').get(nodeId);
+    if (node) pushToSink(config, node, device.name).catch(() => {});
+  }
   return reply.code(201).send(response);
 });
 app.post('/v1/nodes/:nodeId/interventions', (request, reply) => {
